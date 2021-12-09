@@ -1,4 +1,5 @@
 #include <iostream>
+#include <iomanip>
 #include <sstream>
 #include <cstdint>
 #include <cstring>
@@ -30,11 +31,14 @@ struct dir_entry { // size: 64 bytes
 class FS {
 private:
     Disk disk;
+    std::string current_working_directory = "/";
+    uint16_t current_working_directory_block = 0;
     // size of a FAT entry is 2 bytes
     int16_t fat[BLOCK_SIZE/2];
     int findFirstFreeBlock();
     int getNoFreeBlocks();
     int createDirEntry(dir_entry *de);
+    // int findDir(std::string filepath, uint16_t &block, uint32_t &size);
     void printFAT();
 
 
