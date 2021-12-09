@@ -20,27 +20,29 @@
 #define WRITE 0x02
 #define EXECUTE 0x01
 
-struct dir_entry { // size: 64 bytes
-    char file_name[56]; // name of the file / sub-directory
-    uint32_t size; // size of the file in bytes
-    uint16_t first_blk; // index in the FAT for the first block of the file
-    uint8_t type; // directory (1) or file (0)
+struct dir_entry
+{                          // size: 64 bytes
+    char file_name[56];    // name of the file / sub-directory
+    uint32_t size;         // size of the file in bytes
+    uint16_t first_blk;    // index in the FAT for the first block of the file
+    uint8_t type;          // directory (1) or file (0)
     uint8_t access_rights; // read (0x04), write (0x02), execute (0x01)
 };
 
-class FS {
+class FS
+{
 private:
     Disk disk;
     std::string current_working_directory = "/";
     uint16_t current_working_directory_block = 0;
     // size of a FAT entry is 2 bytes
-    int16_t fat[BLOCK_SIZE/2];
+    int16_t fat[BLOCK_SIZE / 2];
     int findFirstFreeBlock();
     int getNoFreeBlocks();
     int createDirEntry(dir_entry *de);
     // int findDir(std::string filepath, uint16_t &block, uint32_t &size);
+    void updateFAT(int block_start, uint32_t size);
     void printFAT();
-
 
 public:
     FS();
