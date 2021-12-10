@@ -190,7 +190,7 @@ int FS::cat(std::string filepath)
   int block, size;
   for (auto &dir : root_block)
   {
-    if (dir.file_name == filepath)
+    if (dir.type != TYPE_EMPTY && dir.file_name == filepath)
     {
       block = dir.first_blk;
       size = dir.size;
@@ -454,11 +454,11 @@ int FS::rm(std::string filepath)
 
   // find filepath
   bool found_dir = false;
-  uint16_t current_block = -1, next_block;
+  int current_block, next_block;
 
   for (auto &dir : root_block)
   {
-    if (dir.file_name == filepath)
+    if (dir.type != TYPE_EMPTY && dir.file_name == filepath)
     {
       // mark dir_entry as empty
       dir.type = TYPE_EMPTY;
@@ -477,25 +477,20 @@ int FS::rm(std::string filepath)
   printFAT();
 
   // free FAT entries
-  while (true) // segfault
+  do
   {
-    if (fat[current_block] != FAT_EOF)
-      next_block = fat[current_block];
-
+    next_block = fat[current_block];
     fat[current_block] = FAT_FREE;
-
-    if (fat[current_block] == FAT_EOF)
-      break;
-    else
-      current_block = next_block;
-    
-    std::cout << "current: " << current_block << ", next: " << next_block << std::endl;
-  }
+    current_block = next_block;
+    //std::cout << "current: " << current_block << ", next: " << next_block << std::endl;
+  } while (current_block != FAT_EOF);
+  
+  // write to FAT
+  disk.write(FAT_BLOCK, (uint8_t *) fat);
   printFAT();
 
-  // write to FAT
-
   // write to disk
+  disk.write(ROOT_BLOCK, (uint8_t *) root_block);
 
   return 0;
 }
