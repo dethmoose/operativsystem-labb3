@@ -386,27 +386,40 @@ int FS::mv(std::string sourcepath, std::string destpath)
 
   // search files for sourcepath and destpath
   bool found_source_dir = false, found_dest_dir = false;
-  dir_entry dir_ent;
-  int index = -1;
+  //dir_entry dir_ent;
+  //int index = -1;
 
-  for (int i = 0; i < BLOCK_SIZE / 64; i++)
+  //for (int i = 0; i < BLOCK_SIZE / 64; i++)
+  //{
+  //  if (root_block[i].file_name == sourcepath)
+  //  {
+  //    found_source_dir = true;
+  //    dir_ent = root_block[i];
+  //    index = i;
+  //  }
+  //  if (root_block[i].file_name == destpath)
+  //  {
+  //    found_dest_dir = true;
+  //  }
+  //}
+
+  for (auto &dir : root_block)
   {
-    if (root_block[i].file_name == sourcepath)
+    if (dir.file_name == destpath)
     {
-      found_source_dir = true;
-      dir_ent = root_block[i];
-      index = i;
-    }
-    if (root_block[i].file_name == destpath)
-    {
-      found_dest_dir = true;
+      std::cout << destpath << " already exists" << std::endl;
+      return -1;
     }
   }
 
-  if (found_dest_dir)
+  for (auto &dir : root_block)
   {
-    std::cout << destpath << " already exists" << std::endl;
-    return -1;
+    if (dir.file_name == sourcepath)
+    {
+      std::strcpy(dir.file_name, destpath.c_str());
+      found_source_dir = true;
+      break;
+    }
   }
 
   if (!found_source_dir)
@@ -416,8 +429,8 @@ int FS::mv(std::string sourcepath, std::string destpath)
   }
 
   // rename filename on source dir_entry in root block
-  std::strcpy(dir_ent.file_name, destpath.c_str());
-  root_block[index] = dir_ent;
+  //std::strcpy(dir_ent.file_name, destpath.c_str());
+  //root_block[index] = dir_ent;
 
   disk.write(ROOT_BLOCK, (uint8_t *) root_block);
 
@@ -433,6 +446,56 @@ int FS::rm(std::string filepath)
   //     if not, exit
   // mark FAT entries as FAT_EMPTY
   // mark dir_entry in ROOT_BLOCK as TYPE_EMPTY
+
+  // read root block and FAT block from disk
+  dir_entry root_block[BLOCK_SIZE / 64];
+  disk.read(ROOT_BLOCK, (uint8_t *)root_block);
+  disk.read(FAT_BLOCK, (uint8_t *)fat);
+
+  // find filepath
+  bool found_dir = false;
+  uint16_t current_block = -1, next_block;
+
+  for (auto &dir : root_block)
+  {
+    if (dir.file_name == filepath)
+    {
+      // mark dir_entry as empty
+      dir.type = TYPE_EMPTY;
+      current_block = dir.first_blk;
+      found_dir = true;
+      break;
+    }
+  }
+
+  if (!found_dir)
+  {
+    std::cout << filepath << " does not exist" << std::endl;
+    return -1;
+  }
+
+  printFAT();
+
+  // free FAT entries
+  while (true) // segfault
+  {
+    if (fat[current_block] != FAT_EOF)
+      next_block = fat[current_block];
+
+    fat[current_block] = FAT_FREE;
+
+    if (fat[current_block] == FAT_EOF)
+      break;
+    else
+      current_block = next_block;
+    
+    std::cout << "current: " << current_block << ", next: " << next_block << std::endl;
+  }
+  printFAT();
+
+  // write to FAT
+
+  // write to disk
 
   return 0;
 }
