@@ -3,10 +3,8 @@
 
 // TODO:
 /*
-  check existing filenames when creating file .
   create general findDir function
-  should user be able to input lines longer than 4096 chars for file data?
-  cat sometimes doesn't show last bit of long files even when lines < 4096 chars
+  ls: save tuples (file_name, size) to a vector and then print sorted alphabetically?
 */
 
 FS::FS()
@@ -77,8 +75,20 @@ int FS::create(std::string filepath)
     return -1;
   }
 
-  // read FAT
-  disk.read(FAT_BLOCK, (uint8_t *)fat);
+  // read root block and FAT block
+  dir_entry root_block[BLOCK_SIZE / 64];
+  disk.read(ROOT_BLOCK, (uint8_t *) root_block);  
+  disk.read(FAT_BLOCK, (uint8_t *) fat);
+
+  // make sure filepath doesn't already exist
+  for (auto &dir : root_block)
+  {
+    if (dir.file_name == filepath)
+    {
+      std::cout << filepath << " already exists" << std::endl;
+      return -1;
+    }
+  }
 
   int block_no = findFirstFreeBlock();
   if (block_no == -1)
@@ -151,6 +161,7 @@ int FS::create(std::string filepath)
   // write FAT to disk
   disk.write(FAT_BLOCK, (uint8_t *)fat);
   printFAT();
+
   // write to root block
   dir_entry *ptr = &dir_ent;
   createDirEntry(ptr);
@@ -175,7 +186,7 @@ int FS::cat(std::string filepath)
   // uint32_t size;
   // bool found_dir = findDir(filepath, &block, &size);
 
-  bool found_dir = 0;
+  bool found_dir = false;
   int block, size;
   for (auto &dir : root_block)
   {
@@ -183,7 +194,7 @@ int FS::cat(std::string filepath)
     {
       block = dir.first_blk;
       size = dir.size;
-      found_dir = 1;
+      found_dir = true;
       break;
     }
   }
@@ -224,7 +235,7 @@ int FS::cat(std::string filepath)
     block = fat[block];
   } while (block != FAT_EOF);
 
-  // Append results to string.
+  // Print string.
   std::cout << to_print << std::endl;
   return 0;
 }
@@ -233,14 +244,16 @@ int FS::cat(std::string filepath)
 int FS::ls()
 {
   std::cout << "FS::ls()\n";
+
+  // read root block
   dir_entry root_block[BLOCK_SIZE / 64];
   disk.read(ROOT_BLOCK, (uint8_t *)root_block);
 
+  // print heading
   int dir_name_width = 56, number_width = 10;
   std::cout << std::left << std::setw(dir_name_width) << std::setfill(' ') << "name";
   std::cout << std::left << std::setw(number_width) << std::setfill(' ') << "size" << std::endl;
 
-  // save tuples (file_name, size) to a vector and then print sorted alphabetically?
   for (auto &dir : root_block)
   {
     if (dir.type != TYPE_EMPTY)
@@ -273,13 +286,14 @@ int FS::cp(std::string sourcepath, std::string destpath)
 {
   std::cout << "FS::cp(" << sourcepath << "," << destpath << ")\n";
 
-  // read from disk
+  // read root block and FAT block from disk
   dir_entry root_block[BLOCK_SIZE / 64];
   disk.read(ROOT_BLOCK, (uint8_t *)root_block);
   disk.read(FAT_BLOCK, (uint8_t *)fat);
 
-  // find sourcepath
+  // find sourcepath, make sure destpath doesn't exist
   // findDir(sourcepath);
+  bool found_source_dir = false, found_dest_dir = false;
   uint32_t size;
   uint16_t source_block;
   uint8_t type, access_rights;
@@ -291,8 +305,25 @@ int FS::cp(std::string sourcepath, std::string destpath)
       size = dir.size;
       type = dir.type;
       access_rights = dir.access_rights;
-      break;
+      found_source_dir = true;
+      //break;
     }
+    if (dir.file_name == destpath)
+    {
+      found_dest_dir = true;
+    }
+  }
+
+  if (found_dest_dir)
+  {
+    std::cout << destpath << " already exists" << std::endl;
+    return -1;
+  }
+
+  if (!found_source_dir)
+  {
+    std::cout << sourcepath << " does not exist" << std::endl;
+    return -1;
   }
 
   int no_free = getNoFreeBlocks();
@@ -312,25 +343,21 @@ int FS::cp(std::string sourcepath, std::string destpath)
   // write to root block
   createDirEntry(&dir_ent);
 
-  int current_block;
-
-  // TODO: Possibly break out update FAT into own function. Repeating code in cp and create.
   // write to FAT
   updateFAT(block_no, size);
-  disk.write(FAT_BLOCK, (uint8_t *)fat);
-
-  // copy data from sourcepath to destpath
-  uint16_t dest_block = dir_ent.first_blk;
+  disk.write(FAT_BLOCK, (uint8_t *) fat);
 
   printFAT();
 
-  // write to disk
+  // copy data from sourcepath to destpath
+  uint16_t dest_block = dir_ent.first_blk;
   char block[BLOCK_SIZE] = {0};
+
   while (true)
   {
-    std::cout << "source_block " << source_block << " copies to dest_block " << dest_block << std::endl;
-    disk.read(source_block, (uint8_t *)block); // read source block
-    disk.write(dest_block, (uint8_t *)block);  // write dest block
+    //std::cout << "source_block " << source_block << " copies to dest_block " << dest_block << std::endl;
+    disk.read(source_block, (uint8_t *) block); // read source block
+    disk.write(dest_block, (uint8_t *) block);  // write dest block
     if (fat[source_block] == FAT_EOF || fat[dest_block] == FAT_EOF)
       break;
     dest_block = fat[dest_block];
@@ -346,13 +373,53 @@ int FS::mv(std::string sourcepath, std::string destpath)
 {
   std::cout << "FS::mv(" << sourcepath << "," << destpath << ")\n";
 
-  // search files for sourcepath, and destpath
-
   // if destpath exists
   // if TYPE_DIR, move to directory
   //
   // if TYPE_FILE, abort operation, can't rename to existing filename
   // else rename sourcepath to destpath
+
+  // read root block and FAT block
+  dir_entry root_block[BLOCK_SIZE / 64];
+  disk.read(ROOT_BLOCK, (uint8_t *) root_block);
+  disk.read(FAT_BLOCK, (uint8_t *) fat);
+
+  // search files for sourcepath and destpath
+  bool found_source_dir = false, found_dest_dir = false;
+  dir_entry dir_ent;
+  int index = -1;
+
+  for (int i = 0; i < BLOCK_SIZE / 64; i++)
+  {
+    if (root_block[i].file_name == sourcepath)
+    {
+      found_source_dir = true;
+      dir_ent = root_block[i];
+      index = i;
+    }
+    if (root_block[i].file_name == destpath)
+    {
+      found_dest_dir = true;
+    }
+  }
+
+  if (found_dest_dir)
+  {
+    std::cout << destpath << " already exists" << std::endl;
+    return -1;
+  }
+
+  if (!found_source_dir)
+  {
+    std::cout << sourcepath << " does not exist" << std::endl;
+    return -1;
+  }
+
+  // rename filename on source dir_entry in root block
+  std::strcpy(dir_ent.file_name, destpath.c_str());
+  root_block[index] = dir_ent;
+
+  disk.write(ROOT_BLOCK, (uint8_t *) root_block);
 
   return 0;
 }
@@ -484,9 +551,8 @@ void FS::printFAT()
   disk.read(FAT_BLOCK, (uint8_t *)fat);
 
   for (int i = 0; i < 15; i++)
-  {
     std::cout << (int)fat[i] << ", ";
-  }
+  
   std::cout << std::endl;
 }
 
