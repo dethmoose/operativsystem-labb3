@@ -77,8 +77,8 @@ int FS::create(std::string filepath)
 
   // read root block and FAT block
   dir_entry root_block[BLOCK_SIZE / 64];
-  disk.read(ROOT_BLOCK, (uint8_t *) root_block);  
-  disk.read(FAT_BLOCK, (uint8_t *) fat);
+  disk.read(ROOT_BLOCK, (uint8_t *)root_block);
+  disk.read(FAT_BLOCK, (uint8_t *)fat);
 
   // make sure filepath doesn't already exist
   for (auto &dir : root_block)
@@ -306,7 +306,7 @@ int FS::cp(std::string sourcepath, std::string destpath)
       type = dir.type;
       access_rights = dir.access_rights;
       found_source_dir = true;
-      //break;
+      // break;
     }
     if (dir.file_name == destpath)
     {
@@ -345,7 +345,7 @@ int FS::cp(std::string sourcepath, std::string destpath)
 
   // write to FAT
   updateFAT(block_no, size);
-  disk.write(FAT_BLOCK, (uint8_t *) fat);
+  disk.write(FAT_BLOCK, (uint8_t *)fat);
 
   printFAT();
 
@@ -355,9 +355,9 @@ int FS::cp(std::string sourcepath, std::string destpath)
 
   while (true)
   {
-    //std::cout << "source_block " << source_block << " copies to dest_block " << dest_block << std::endl;
-    disk.read(source_block, (uint8_t *) block); // read source block
-    disk.write(dest_block, (uint8_t *) block);  // write dest block
+    // std::cout << "source_block " << source_block << " copies to dest_block " << dest_block << std::endl;
+    disk.read(source_block, (uint8_t *)block); // read source block
+    disk.write(dest_block, (uint8_t *)block);  // write dest block
     if (fat[source_block] == FAT_EOF || fat[dest_block] == FAT_EOF)
       break;
     dest_block = fat[dest_block];
@@ -381,27 +381,27 @@ int FS::mv(std::string sourcepath, std::string destpath)
 
   // read root block and FAT block
   dir_entry root_block[BLOCK_SIZE / 64];
-  disk.read(ROOT_BLOCK, (uint8_t *) root_block);
-  disk.read(FAT_BLOCK, (uint8_t *) fat);
+  disk.read(ROOT_BLOCK, (uint8_t *)root_block);
+  disk.read(FAT_BLOCK, (uint8_t *)fat);
 
   // search files for sourcepath and destpath
   bool found_source_dir = false, found_dest_dir = false;
-  //dir_entry dir_ent;
-  //int index = -1;
+  // dir_entry dir_ent;
+  // int index = -1;
 
-  //for (int i = 0; i < BLOCK_SIZE / 64; i++)
+  // for (int i = 0; i < BLOCK_SIZE / 64; i++)
   //{
-  //  if (root_block[i].file_name == sourcepath)
-  //  {
-  //    found_source_dir = true;
-  //    dir_ent = root_block[i];
-  //    index = i;
-  //  }
-  //  if (root_block[i].file_name == destpath)
-  //  {
-  //    found_dest_dir = true;
-  //  }
-  //}
+  //   if (root_block[i].file_name == sourcepath)
+  //   {
+  //     found_source_dir = true;
+  //     dir_ent = root_block[i];
+  //     index = i;
+  //   }
+  //   if (root_block[i].file_name == destpath)
+  //   {
+  //     found_dest_dir = true;
+  //   }
+  // }
 
   for (auto &dir : root_block)
   {
@@ -429,10 +429,10 @@ int FS::mv(std::string sourcepath, std::string destpath)
   }
 
   // rename filename on source dir_entry in root block
-  //std::strcpy(dir_ent.file_name, destpath.c_str());
-  //root_block[index] = dir_ent;
+  // std::strcpy(dir_ent.file_name, destpath.c_str());
+  // root_block[index] = dir_ent;
 
-  disk.write(ROOT_BLOCK, (uint8_t *) root_block);
+  disk.write(ROOT_BLOCK, (uint8_t *)root_block);
 
   return 0;
 }
@@ -482,15 +482,15 @@ int FS::rm(std::string filepath)
     next_block = fat[current_block];
     fat[current_block] = FAT_FREE;
     current_block = next_block;
-    //std::cout << "current: " << current_block << ", next: " << next_block << std::endl;
+    // std::cout << "current: " << current_block << ", next: " << next_block << std::endl;
   } while (current_block != FAT_EOF);
-  
+
   // write to FAT
-  disk.write(FAT_BLOCK, (uint8_t *) fat);
+  disk.write(FAT_BLOCK, (uint8_t *)fat);
   printFAT();
 
   // write to disk
-  disk.write(ROOT_BLOCK, (uint8_t *) root_block);
+  disk.write(ROOT_BLOCK, (uint8_t *)root_block);
 
   return 0;
 }
@@ -506,7 +506,39 @@ int FS::append(std::string filepath1, std::string filepath2)
   // decide how many new blocks filepath2 needs by filepath1.size
   // write to new block(s)
   // update FAT
+  // write from FAT_EOF of filepath2 and set new EOF
 
+  // Read root block and FAT
+  // TODO: Update this for directories.
+  dir_entry root_block[BLOCK_SIZE / 64];
+  disk.read(ROOT_BLOCK, (uint8_t *)root_block);
+  disk.read(FAT_BLOCK, (uint8_t *)fat);
+
+  // Search for filepaths, exit if not found
+  int filepath1_block, filepath2_block, size1, size2;
+  int no_found = 0;
+  for (auto &dir : root_block)
+  {
+    if (std::string(dir.file_name) == filepath1)
+    {
+      filepath1_block = dir.first_blk;
+      size1 = dir.size;
+      no_found++;
+    }
+    if (std::string(dir.file_name) == filepath2)
+    {
+      filepath2_block = dir.first_blk;
+      size2 = dir.size;
+      no_found++;
+    }
+  }
+
+  if (no_found != 2) // Expecting exactly two files found.
+    return -1;
+
+  char block[BLOCK_SIZE] = {0};
+
+  int blocks_to_read = size1 / BLOCK_SIZE + 1;
   return 0;
 }
 
@@ -610,7 +642,7 @@ void FS::printFAT()
 
   for (int i = 0; i < 15; i++)
     std::cout << (int)fat[i] << ", ";
-  
+
   std::cout << std::endl;
 }
 
