@@ -442,11 +442,6 @@ int FS::rm(std::string filepath)
 {
   std::cout << "FS::rm(" << filepath << ")\n";
 
-  // check if filepath exists
-  //     if not, exit
-  // mark FAT entries as FAT_EMPTY
-  // mark dir_entry in ROOT_BLOCK as TYPE_EMPTY
-
   // read root block and FAT block from disk
   dir_entry root_block[BLOCK_SIZE / 64];
   disk.read(ROOT_BLOCK, (uint8_t *)root_block);
@@ -489,7 +484,7 @@ int FS::rm(std::string filepath)
   disk.write(FAT_BLOCK, (uint8_t *)fat);
   printFAT();
 
-  // write to disk
+  // write to root
   disk.write(ROOT_BLOCK, (uint8_t *)root_block);
 
   return 0;
@@ -535,10 +530,95 @@ int FS::append(std::string filepath1, std::string filepath2)
 
   if (no_found != 2) // Expecting exactly two files found.
     return -1;
+  
+  // Check if enough free blocks
+  int no_free_blocks = getNoFreeBlocks();
+  int new_blocks_needed = ((size1 - ( size2 % BLOCK_SIZE)) / BLOCK_SIZE) + 1; // sometimes needs +1, sometimes not
+  if (no_free_blocks < new_blocks_needed)
+    return -1;
 
-  char block[BLOCK_SIZE] = {0};
+  // tried using float for deciding when to add +1 and when not to
+  // float new_blocks_needed = (( (float) size1 - ( size2 % BLOCK_SIZE)) / (float) BLOCK_SIZE); // sometimes +1, sometimes not
+  // if ((new_blocks_needed - (int) new_blocks_needed) != 0)
+  //   new_blocks_needed = (int) new_blocks_needed + 1;
 
+  std::cout << std::endl << "Number of free blocks on disk: " << no_free_blocks << std::endl;
+  std::cout << "Size filepath1: " << size1 << std::endl;
+  std::cout << "Size filepath2: " << size2 << std::endl;
+  std::cout << "First block filepath1: " << filepath1_block << std::endl;
+  std::cout << "First block filepath2: " << filepath2_block << std::endl;
+  std::cout << "(size2 % BLOCK_SIZE): " << size2 % BLOCK_SIZE << std::endl;
+  std::cout << "New size filepath2: " << size1 + size2 << std::endl;
+  std::cout << "New blocks needed for filepath2: " << new_blocks_needed << std::endl;
+  std::cout << "Total number of blocks needed for filepath2 after append: " << (size1 + size2) / BLOCK_SIZE + 1 << std::endl << std::endl;
+
+  // Update FAT entries for filepath2
+
+  // Find end of filepath2
+  while (fat[filepath2_block] != FAT_EOF)
+    filepath2_block = fat[filepath2_block];
+  
+  // Read filepath1 data
   int blocks_to_read = size1 / BLOCK_SIZE + 1;
+  char block[BLOCK_SIZE] = {0};
+  std::string filepath1_data = "";
+
+  for (blocks_to_read; blocks_to_read > 0; blocks_to_read--)
+  {
+    disk.read(filepath1_block, (uint8_t *)block);
+    if (blocks_to_read > 1)
+    {
+      // filepath1_data.append(block); // append char* to string
+      for (int i = 0; i < BLOCK_SIZE; i++)
+      {
+        filepath1_data += block[i];
+      }
+    }
+    else
+    {
+      for (int i = 0; i < size1 % BLOCK_SIZE; i++)
+      {
+        filepath1_data += block[i];
+      }
+    }
+    filepath1_block = fat[filepath1_block];
+  }
+
+  // Checking filepath1_data
+  std::cout << filepath1_data.size() << std::endl;
+  std::cout << filepath1_data << std::endl;
+
+  // Write data to the end of filepath2
+  int data_index = 0, first_iteration = 1;
+  while (filepath2_block != FAT_EOF && data_index < size1)
+  {
+    // Write one block at a time
+    if (first_iteration)
+    {
+      // Read last block of filepath2 and start writing at the end
+      disk.read(filepath2_block, (uint8_t *)block);
+      for (int i = size2 % BLOCK_SIZE + 1; i < BLOCK_SIZE; i++)
+      {
+        block[i] = filepath1_data[data_index];
+        data_index++;
+      }
+      first_iteration = 0;
+    }
+    else
+    {
+      // Write to a new block
+      for (int i = 0; i < BLOCK_SIZE; i++)
+      {
+        block[i] = filepath1_data[data_index];
+        data_index++;
+      }      
+    }
+    disk.write(filepath2_block, (uint8_t *)block);
+    filepath2_block = fat[filepath2_block];
+  }
+
+  // Update filepath2.size in root block
+  
   return 0;
 }
 
