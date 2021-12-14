@@ -3,6 +3,7 @@
 #include <sstream>
 #include <cstdint>
 #include <cstring>
+#include <vector>
 #include "disk.h"
 
 #ifndef __FS_H__
@@ -44,7 +45,7 @@ private:
     int createDirEntry(dir_entry *de);
     // int findDir(std::string filepath, uint16_t &block, uint32_t &size);
     void updateFAT(int block_start, uint32_t size);
-    int findPath(std::string path);
+    std::vector<std::string> interpretFilepath(std::string path);
     void printFAT();
 
 public:

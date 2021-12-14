@@ -20,8 +20,9 @@ FS::~FS()
 // formats the disk, i.e., creates an empty file system
 int FS::format()
 {
-
   std::cout << "FS::format()\n";
+
+  cwd = ROOT_BLOCK;
 
   // Erase diskfile.bin for good
   uint8_t null_block[BLOCK_SIZE] = {0};
@@ -40,9 +41,6 @@ int FS::format()
 
   // write entire FAT to disk
   disk.write(FAT_BLOCK, (uint8_t *)fat);
-
-
-
 
   // create dir_entry for root directory
   std::string dir_name = "/";
@@ -70,7 +68,7 @@ int FS::format()
     working_directory[i] = dir_ent;
   }
 
-  disk.write(ROOT_BLOCK, (uint8_t *) working_directory);
+  disk.write(ROOT_BLOCK, (uint8_t *)working_directory);
 
   return 0;
 }
@@ -88,8 +86,8 @@ int FS::create(std::string filepath)
 
   // read root block and FAT block
   // dir_entry root_block[BLOCK_SIZE / 64];
-  disk.read(cwd, (uint8_t *) working_directory);
-  disk.read(FAT_BLOCK, (uint8_t *) fat);
+  disk.read(cwd, (uint8_t *)working_directory);
+  disk.read(FAT_BLOCK, (uint8_t *)fat);
 
   // make sure filepath doesn't already exist
   for (auto &dir : working_directory)
@@ -171,7 +169,6 @@ int FS::create(std::string filepath)
     current_block = fat[current_block];
     counter++;
   }
-
 
   printFAT();
 
@@ -414,7 +411,8 @@ int FS::mv(std::string sourcepath, std::string destpath)
         // std::cout << "Error: Destination " << destpath << " already exists" << std::endl;
         return -1;
       }
-      else {
+      else
+      {
         // If destination is a directory, need some way to find the directory block
         // to move the dir_entry from root_block to new directory. Not necessary to move file blocks.
         destination_is_dir = true;
@@ -423,9 +421,12 @@ int FS::mv(std::string sourcepath, std::string destpath)
     }
   }
 
-  if (found_source_dir) {
+  if (found_source_dir)
+  {
     std::strcpy(working_directory[src_index].file_name, destpath.c_str());
-  } else {
+  }
+  else
+  {
     // std::cout << "Error: Source " << sourcepath << " not found" << std::endl;
     return -1;
   }
@@ -533,14 +534,14 @@ int FS::append(std::string filepath1, std::string filepath2)
 
   // Update FAT entries for filepath2
   updateFAT(filepath2_block, size1); // May allocate one too many fat entries, TODO
-  disk.write(FAT_BLOCK, (uint8_t *) fat);
+  disk.write(FAT_BLOCK, (uint8_t *)fat);
 
   // Read filepath1 data
   char block[BLOCK_SIZE] = {0};
   std::string filepath1_data = "";
   int current_block = filepath1_block;
 
-  while(current_block != FAT_EOF)
+  while (current_block != FAT_EOF)
   {
     disk.read(current_block, (uint8_t *)block);
     filepath1_data.append(block); // append char* to string
@@ -587,7 +588,7 @@ int FS::append(std::string filepath1, std::string filepath2)
     }
   }
 
-  disk.write(ROOT_BLOCK, (uint8_t*) working_directory);
+  disk.write(ROOT_BLOCK, (uint8_t *)working_directory);
 
   return 0;
 }
@@ -604,8 +605,8 @@ int FS::mkdir(std::string dirpath)
   // files in a subdirectory cannot be find in root block
 
   // read root block and FAT block
-  disk.read(cwd, (uint8_t *) working_directory);
-  disk.read(FAT_BLOCK, (uint8_t *) fat);
+  disk.read(cwd, (uint8_t *)working_directory);
+  disk.read(FAT_BLOCK, (uint8_t *)fat);
 
   // make sure filepath doesn't already exist
   for (auto &dir : working_directory)
@@ -624,7 +625,6 @@ int FS::mkdir(std::string dirpath)
     return -1;
   }
 
-
   // create dir_entry for directory
   dir_entry dir_ent;
   std::strcpy(dir_ent.file_name, dirpath.c_str());
@@ -632,7 +632,6 @@ int FS::mkdir(std::string dirpath)
   dir_ent.first_blk = current_block;
   dir_ent.type = TYPE_DIR;
   dir_ent.access_rights = READ | WRITE | EXECUTE;
-
 
   updateFAT(dir_ent.first_blk, dir_ent.size);
 
@@ -649,7 +648,7 @@ int FS::mkdir(std::string dirpath)
   // ".." refers to itself
   std::string dotdot = "..";
   std::strcpy(dir_ent.file_name, dotdot.c_str());
-  dir_ent.size = 0; // use to find parent directory block?
+  dir_ent.size = 0;        // use to find parent directory block?
   dir_ent.first_blk = cwd; // use to find parent directory block?
   dir_ent.type = TYPE_DIR;
   dir_ent.access_rights = READ | WRITE | EXECUTE;
@@ -668,7 +667,7 @@ int FS::mkdir(std::string dirpath)
     working_directory[i] = dir_ent;
   }
 
-  disk.write(cwd, (uint8_t*) working_directory);
+  disk.write(cwd, (uint8_t *)working_directory);
 
   // Reset cwd
   cwd = dir_ent.first_blk;
@@ -681,29 +680,32 @@ int FS::cd(std::string dirpath)
 {
   std::cout << "FS::cd(" << dirpath << ")\n";
 
-  int temp = cwd;
   // Interpret string to determine the steps required
+  std::vector<std::string> filepath = interpretFilepath(dirpath);
+
+  int temp = cwd;
   char delimiter = '/';
 
-  if (dirpath[0] == delimiter)
+  if (filepath[0] == "/")
   {
     cwd == ROOT_BLOCK;
   }
 
-  disk.read(cwd, (uint8_t*) working_directory);
+  disk.read(cwd, (uint8_t *)working_directory);
 
+  bool dir_found = false;
+  for (int i = 0; i < filepath.size(); i++)
+  {
+    if (filepath[i] == "/")
+      continue;
 
-  std::istringstream iss(dirpath);
-  std::string path;
-  while (std::getline(iss, path, delimiter)) {
-    bool dir_found = false;
-
+    std::cout << filepath[i] << std::endl;
     for (auto &dir : working_directory)
     {
-      if(path == ".") // We don't have to change cwd if we encounter '.'
+      if (filepath[i] == ".") // We don't have to change cwd if we encounter '.'
         continue;
 
-      if(std::string(dir.file_name) == path)
+      if (std::string(dir.file_name) == filepath[i])
       {
         cwd = dir.first_blk;
         dir_found = true;
@@ -715,15 +717,8 @@ int FS::cd(std::string dirpath)
       cwd = temp;
       return -1;
     }
-    disk.read(cwd, (uint8_t*) working_directory);
+    disk.read(cwd, (uint8_t *)working_directory);
   }
-
-
-  // if absolute, start from ROOT_BLOCK
-  // else start from cwd.
-
-  // Read to working_directory current block, then traverse through directories to find destination
-  // when found, return dir.first_blk
 
   return 0;
 }
@@ -733,6 +728,7 @@ int FS::cd(std::string dirpath)
 int FS::pwd()
 {
   std::cout << "FS::pwd()\n";
+  std::cout << current_working_directory << std::endl;
   return 0;
 }
 
@@ -824,8 +820,24 @@ void FS::updateFAT(int block_start, uint32_t size)
   fat[current_block] = FAT_EOF;
 }
 
-int FS::findPath(std::string path)
+std::vector<std::string> FS::interpretFilepath(std::string dirpath)
 {
+  std::vector<std::string> path_vec;
+  char delimiter = '/';
+  if (dirpath[0] == delimiter)
+    path_vec.push_back("/");
 
+  // Interpret string to determine the steps required
 
+  std::istringstream iss(dirpath);
+  std::string path;
+  while (std::getline(iss, path, delimiter))
+  {
+    if (path == ".") // We don't have to change cwd if we encounter '.'
+      continue;
+
+    path_vec.push_back(path);
+  }
+
+  return path_vec;
 }
