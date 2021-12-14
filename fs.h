@@ -3,6 +3,7 @@
 #include <sstream>
 #include <cstdint>
 #include <cstring>
+#include <vector>
 #include "disk.h"
 
 #ifndef __FS_H__
@@ -35,17 +36,18 @@ private:
     Disk disk;
     std::string current_working_directory = "/";
     uint16_t current_working_directory_block = 0;
-    // size of a FAT entry is 2 bytes
     int cwd = ROOT_BLOCK;
     int16_t fat[BLOCK_SIZE / 2];
-    dir_entry working_directory[BLOCK_SIZE / 64];
+    dir_entry working_directory[BLOCK_SIZE / 64] = {0};
+
     int findFirstFreeBlock();
     int getNoFreeBlocks();
     int createDirEntry(dir_entry *de);
+    int findPath(std::string path);
     // int findDir(std::string filepath, uint16_t &block, uint32_t &size);
     void updateFAT(int block_start, uint32_t size);
-    int findPath(std::string path);
     void printFAT();
+    std::vector<std::string> interpretFilepath(std::string dirpath);
 
 public:
     FS();
