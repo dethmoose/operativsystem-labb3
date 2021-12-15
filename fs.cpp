@@ -3,10 +3,13 @@
 #include "fs.h"
 
 // TODO:
-/*
+/*  
+  remove all "error" prints? and then only return -1 on error
   cp: update to handle copy to directory
   create general findDir function
   ls: save tuples (file_name, size) to a vector and then print sorted alphabetically?
+  "the access rights on a directory must be correct for various file operations (e.g., moving/copying a file to a directory requires write access on that directory), etc"
+  "access rights of a file or directory should be 'rw-' or 'rwx' when the file / directory is created"
 */
 
 FS::FS()
@@ -32,18 +35,18 @@ int FS::format()
     disk.write(i, null_block);
   }
 
-  // initialize FAT
+  // Initialize FAT
   fat[ROOT_BLOCK] = FAT_EOF;
   fat[FAT_BLOCK] = FAT_EOF;
 
-  // rest of the blocks are marked as free
+  // Rest of the blocks are marked as free
   for (int i = 2; i < BLOCK_SIZE / 2; i++)
     fat[i] = FAT_FREE;
 
-  // write entire FAT to disk
+  // Write entire FAT to disk
   disk.write(FAT_BLOCK, (uint8_t *)fat);
 
-  // create dir_entry for root directory
+  // Create dir_entry for root directory
   std::string dir_name = "/";
   dir_entry dir_ent;
   std::strcpy(dir_ent.file_name, dir_name.c_str());
@@ -436,7 +439,7 @@ int FS::rm(std::string filepath)
   // TODO should not be possible to remove nonempty directory
 
   // Read working directory block and FAT 
-  disk.read(cwd, (uint8_t *)working_directory);
+  disk.read(ROOT_BLOCK, (uint8_t *)working_directory); // cwd
   disk.read(FAT_BLOCK, (uint8_t *)fat);
 
   // Find filepath
@@ -477,7 +480,7 @@ int FS::rm(std::string filepath)
   printFAT();
 
   // Write to working directory
-  disk.write(cwd, (uint8_t *)working_directory);
+  disk.write(ROOT_BLOCK, (uint8_t *)working_directory); // cwd
 
   return 0;
 }
@@ -491,7 +494,7 @@ int FS::append(std::string filepath1, std::string filepath2)
   // TODO: Update this for directories.
 
   // Read working directory block and FAT
-  disk.read(cwd, (uint8_t *)working_directory);
+  disk.read(ROOT_BLOCK, (uint8_t *)working_directory); // cwd
   disk.read(FAT_BLOCK, (uint8_t *)fat);
 
   // Search for filepaths, exit if not found
@@ -581,7 +584,7 @@ int FS::append(std::string filepath1, std::string filepath2)
     }
   }
 
-  disk.write(cwd, (uint8_t*)working_directory);
+  disk.write(ROOT_BLOCK, (uint8_t*)working_directory); // cwd
 
   return 0;
 }
@@ -621,16 +624,18 @@ int FS::mkdir(std::string dirpath)
   dir_ent.type = TYPE_DIR;
   dir_ent.access_rights = READ | WRITE | EXECUTE;
 
+  std::cout << "Created dir at block " << dir_ent.first_blk << std::endl;
+
   updateFAT(dir_ent.first_blk, dir_ent.size);
 
   // Write FAT to disk
   disk.write(FAT_BLOCK, (uint8_t *)fat);
 
-  // printFAT();
+  printFAT();
 
-  // write to working directory block
+  // Write to working directory block
   dir_entry *ptr = &dir_ent;
-  createDirEntry(ptr);
+  createDirEntry(ptr); // reads, modifies, writes working directory block
 
   // Create dir_entry ".." first in this directory's block
   std::string filename = "..";
@@ -640,7 +645,8 @@ int FS::mkdir(std::string dirpath)
   dir_ent.type = TYPE_DIR;
   dir_ent.access_rights = READ | WRITE | EXECUTE;
 
-  // cwd = current_block;
+  uint16_t orig_cwd = cwd;
+  cwd = current_block;
   working_directory[0] = dir_ent;
 
   // Change dir_entry to be empty
@@ -659,7 +665,7 @@ int FS::mkdir(std::string dirpath)
   disk.write(cwd, (uint8_t*)working_directory);
 
   // Reset cwd
-  // cwd = dir_ent.first_blk;
+  cwd = orig_cwd;
 
   return 0;
 }
@@ -801,14 +807,17 @@ int FS::createDirEntry(dir_entry *de)
   int k = 1;
   for (k; k < BLOCK_SIZE / 64; k++)
   {
-    if (working_directory[k].type == TYPE_EMPTY) // first empty in root block
+    if (working_directory[k].type == TYPE_EMPTY) // first empty in working directory block
       break;
   }
   if (k == BLOCK_SIZE / 64)
     return -1;
 
-  // Edit root block
+  // Edit working directory block
   working_directory[k] = *de;
+
+  std::cout << "placed dir_entry with first_blk=" << (*de).first_blk;
+  std::cout << " in cwd " << cwd << std::endl;
 
   // Write working directory block to disk
   disk.write(cwd, (uint8_t *)working_directory);
