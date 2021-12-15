@@ -48,6 +48,7 @@ private:
     void updateFAT(int block_start, uint32_t size);
     void printFAT();
     std::vector<std::string> interpretFilepath(std::string dirpath);
+    std::string accessRightsToString(uint8_t access_rights);
 
 public:
     FS();

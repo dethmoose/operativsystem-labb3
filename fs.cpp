@@ -8,8 +8,8 @@
   cp: update to handle copy to directory
   create general findDir function
   ls: save tuples (file_name, size) to a vector and then print sorted alphabetically?
+  ls: fix better way of translating dir.access_rights to string
   "the access rights on a directory must be correct for various file operations (e.g., moving/copying a file to a directory requires write access on that directory), etc"
-  "access rights of a file or directory should be 'rw-' or 'rwx' when the file / directory is created"
 */
 
 FS::FS()
@@ -117,7 +117,7 @@ int FS::create(std::string filepath)
   dir_ent.size = 0;
   dir_ent.first_blk = current_block;
   dir_ent.type = TYPE_FILE;
-  dir_ent.access_rights = READ | WRITE | EXECUTE;
+  dir_ent.access_rights = READ | WRITE;
 
   // Read user input
   std::string line = "", data_str = "";
@@ -205,6 +205,13 @@ int FS::cat(std::string filepath)
   {
     if (dir.type != TYPE_EMPTY && dir.file_name == filepath)
     {
+      // Check access rights is at least READ
+      if (dir.access_rights < READ)
+      {
+        std::cout << filepath << " does not have read permission" << std::endl;
+        return -1;
+      }
+
       current_block = dir.first_blk;
       size = dir.size;
       found_dir = true;
@@ -254,11 +261,22 @@ int FS::ls()
   // Read working directory block
   disk.read(cwd, (uint8_t *)working_directory);
 
+  // Get longest filename
+  int dir_name_width = 4; // at least length of "name"
+  for (auto &dir : working_directory)
+  {
+    if (dir.type != TYPE_EMPTY && (std::string(dir.file_name).length() > dir_name_width))
+    {
+      dir_name_width = std::string(dir.file_name).length();
+    }
+  }
+  dir_name_width += 2;
+
   // Print heading
-  int dir_name_width = 56, number_width = 10;
   std::cout << std::left << std::setw(dir_name_width) << std::setfill(' ') << "name";
   std::cout << std::left << std::setw(6) << std::setfill(' ') << "type";
-  std::cout << std::left << std::setw(number_width) << std::setfill(' ') << "size" << std::endl;
+  std::cout << std::left << std::setw(14) << std::setfill(' ') << "accessrights";
+  std::cout << std::left << std::setw(10) << std::setfill(' ') << "size" << std::endl;
 
   for (auto &dir : working_directory)
   {
@@ -268,17 +286,25 @@ int FS::ls()
       {
         if (std::string(dir.file_name) != "/" && std::string(dir.file_name) != "..")
         {
+          // Get access rights string (TODO: fix better solution)
+          std::string rwx = accessRightsToString(dir.access_rights);
+          
           std::cout << std::left << std::setw(dir_name_width) << std::setfill(' ') << std::string(dir.file_name);
           std::cout << std::left << std::setw(6) << std::setfill(' ') << "dir";
-          std::cout << std::left << std::setw(number_width) << std::setfill(' ') << "-";
+          std::cout << std::left << std::setw(14) << std::setfill(' ') << rwx;
+          std::cout << std::left << std::setw(10) << std::setfill(' ') << "-";
           std::cout << std::endl;
         }
       }
       else if (dir.type == TYPE_FILE)
       {
+        // Get access rights string (TODO: fix better solution)
+        std::string rwx = accessRightsToString(dir.access_rights);
+        
         std::cout << std::left << std::setw(dir_name_width) << std::setfill(' ') << std::string(dir.file_name);
         std::cout << std::left << std::setw(6) << std::setfill(' ') << "file";
-        std::cout << std::left << std::setw(number_width) << std::setfill(' ') << std::to_string(dir.size);
+        std::cout << std::left << std::setw(14) << std::setfill(' ') << rwx;
+        std::cout << std::left << std::setw(10) << std::setfill(' ') << std::to_string(dir.size);
         std::cout << std::endl;
       }
     }
@@ -310,6 +336,13 @@ int FS::cp(std::string sourcepath, std::string destpath)
   {
     if (dir.file_name == sourcepath)
     {
+      // Check READ permission
+      if (dir.access_rights < READ)
+      {
+        std::cout << sourcepath << " does not have read permission" << std::endl;
+        return -1;
+      }
+
       source_block = dir.first_blk;
       size = dir.size;
       type = dir.type;
@@ -381,6 +414,8 @@ int FS::mv(std::string sourcepath, std::string destpath)
 {
   std::cout << "FS::mv(" << sourcepath << "," << destpath << ")\n";
 
+  // TODO check access rights? (write permission for changing its name?)
+
   // if destpath exists
   //     if TYPE_DIR, move to directory
   //     if TYPE_FILE, abort operation, can't rename to existing filename
@@ -437,6 +472,7 @@ int FS::rm(std::string filepath)
   std::cout << "FS::rm(" << filepath << ")\n";
 
   // TODO should not be possible to remove nonempty directory
+  // TODO check access rights?
 
   // Read working directory block and FAT 
   disk.read(cwd, (uint8_t *)working_directory);
@@ -504,12 +540,25 @@ int FS::append(std::string filepath1, std::string filepath2)
   {
     if (std::string(dir.file_name) == filepath1)
     {
+      // Check for READ permission
+      if (dir.access_rights < READ)
+      {
+        std::cout << filepath1 << " does not have read permission" << std::endl;
+      }
+      
       filepath1_block = dir.first_blk;
       size1 = dir.size;
       no_found++;
     }
     if (std::string(dir.file_name) == filepath2)
     {
+      // Check for WRITE permission
+      if ((dir.access_rights & WRITE) != WRITE) // bitwise and to check if 0x02 bit is true
+      {
+        std::cout << filepath2 << " does not have write permission" << std::endl;
+        return -1;
+      }
+      
       filepath2_block = dir.first_blk;
       size2 = dir.size;
       no_found++;
@@ -643,8 +692,8 @@ int FS::mkdir(std::string dirpath)
   dir_ent.type = TYPE_DIR;
   dir_ent.access_rights = READ | WRITE | EXECUTE;
 
-  uint16_t orig_cwd = cwd;
-  cwd = current_block;
+  // uint16_t orig_cwd = cwd;
+  // cwd = current_block;
   working_directory[0] = dir_ent;
 
   // Change dir_entry to be empty
@@ -660,10 +709,10 @@ int FS::mkdir(std::string dirpath)
     working_directory[i] = dir_ent;
   }
 
-  disk.write(cwd, (uint8_t*)working_directory);
+  disk.write(current_block, (uint8_t*)working_directory);
 
   // Reset cwd
-  cwd = orig_cwd;
+  // cwd = orig_cwd;
 
   return 0;
 }
@@ -761,6 +810,31 @@ int FS::pwd()
 int FS::chmod(std::string accessrights, std::string filepath)
 {
   std::cout << "FS::chmod(" << accessrights << "," << filepath << ")\n";
+  
+  // TODO handle absolute paths and relative paths not in cwd
+
+  // Read working directory block and FAT
+  disk.read(cwd, (uint8_t *)working_directory);
+  disk.read(FAT_BLOCK, (uint8_t *)fat);
+
+  // Check that filepath exists (in cwd only)
+  bool found_dir = false;
+  for (auto &dir : working_directory)
+  {
+    if (std::string(dir.file_name) == filepath)
+    {
+      found_dir = true;
+      dir.access_rights = (uint8_t) std::stoi(accessrights, nullptr, 16); // hex, base 16
+      break;
+    }
+  }
+
+  if (!found_dir)
+    return -1;
+  
+  // Write to disk
+  disk.write(cwd, (uint8_t *)working_directory);
+  
   return 0;
 }
 
@@ -868,4 +942,37 @@ std::vector<std::string> FS::interpretFilepath(std::string dirpath)
   }
 
   return path_vec;
+}
+
+// Get access rights string (TODO: fix better solution)
+std::string FS::accessRightsToString(uint8_t access_rights)
+{
+  std::string rwx = "---";
+  std::string rwx_chars = "rwx";
+  uint8_t rights[3] = {READ, WRITE, EXECUTE};
+
+  for (int i = 0; i < rwx.length(); i++)
+  {
+    if ((access_rights & rights[i]) == rights[i]) // bitwise and
+      rwx[i] = rwx_chars[i];
+  }
+
+  return rwx;
+
+  // if (access_rights == (READ | WRITE | EXECUTE))
+  //   rwx = "rwx";
+  // else if (access_rights == (READ | WRITE))
+  //   rwx = "rw-";
+  // else if (access_rights == (READ | EXECUTE))
+  //   rwx = "r-x";
+  // else if (access_rights == (WRITE | EXECUTE))
+  //   rwx = "-wx";
+  // else if (access_rights == READ)
+  //   rwx = "r--";
+  // else if (access_rights == WRITE)
+  //   rwx = "-w-";
+  // else if (access_rights == EXECUTE)
+  //   rwx = "--x";
+  // else 
+  //   rwx = "---";
 }
