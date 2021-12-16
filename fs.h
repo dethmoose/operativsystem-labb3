@@ -38,13 +38,14 @@ private:
     uint16_t current_working_directory_block = 0;
     int cwd = ROOT_BLOCK;
     int16_t fat[BLOCK_SIZE / 2];
-    dir_entry working_directory[BLOCK_SIZE / 64] = {0};
+    dir_entry working_directory[BLOCK_SIZE / 64];
 
     int findFirstFreeBlock();
     int getNoFreeBlocks();
-    int createDirEntry(dir_entry *de);
+    int createDirEntry(dir_entry *de, int dir_block);
     int findPath(std::string path);
-    // int findDir(std::string filepath, uint16_t &block, uint32_t &size);
+    uint8_t FS::getDirAccessRights(int dir_block);
+    int traverseToDir(std::vector<std::string> filepath);
     void updateFAT(int block_start, uint32_t size);
     void printFAT();
     std::vector<std::string> interpretFilepath(std::string dirpath);
