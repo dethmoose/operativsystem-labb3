@@ -2,6 +2,8 @@
 // Vid inlämning kommer ett mer omfattande automatiskt testprogram att köras,
 // så tänk på att prova även andra exekveringsfall.
 
+// OBS fel ngnstans i filen "rm på en tom mapp ska ge fel", det är tvärtom
+
 // börja gärna varje sekvens med format
 format
 // ska lista en tom katalog
@@ -31,8 +33,8 @@ append a a2
 // kontrollera att "a" är oförändrad och att "a2" har följande innehåll
 cat a2
 // förväntad output
-hej heja hejare
 hej heja hejare hejast
+hej heja hejare
 // passa samtidigt på att kontrollera att när man gör append måste source
 // ha läsrättigheter och dest måste ha både läs- och skrivrättigheter
 // kontrollera att append ger felmeddelande om detta inte uppfylls
