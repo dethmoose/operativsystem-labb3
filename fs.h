@@ -44,7 +44,7 @@ private:
     int getNoFreeBlocks();
     int createDirEntry(dir_entry *de, int dir_block);
     int findPath(std::string path);
-    uint8_t FS::getDirAccessRights(int dir_block);
+    uint8_t getDirAccessRights(int dir_block);
     int traverseToDir(std::vector<std::string> filepath);
     void updateFAT(int block_start, uint32_t size);
     void printFAT();
