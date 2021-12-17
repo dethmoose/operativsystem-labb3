@@ -631,7 +631,7 @@ int FS::rm(std::string filepath)
 {
   std::cout << "FS::rm(" << filepath << ")\n";
 
-  // TODO should not be possible to remove nonempty directory
+  // TODO should not be possible to remove directory the user stands in
 
   // Read working directory block and FAT
   disk.read(cwd, (uint8_t *)working_directory);
@@ -641,19 +641,26 @@ int FS::rm(std::string filepath)
   std::string file = path_vec.back();
   path_vec.pop_back();
 
+  // Go to path
   int temp_cwd = cwd;
   if (path_vec.size())
     temp_cwd = traverseToDir(path_vec);
 
   if (temp_cwd == -1)
+  {
+    std::cout << "Invalid path " << filepath << std::endl;
     return -1;
+  }
 
   int access;
-  if (access = getDirAccessRights(temp_cwd) == -1)
+  if (access = getDirAccessRights(temp_cwd) == -1) // does it work with -1 ?
     return -1;
 
   if (access & (WRITE | READ) != (WRITE | READ)) // Requires Write and Read perm on directory
+  {
+    std::cout << "Missing read and write permission" << std::endl;
     return -1;
+  }
 
   // Find filepath
   bool found_dir = false, found_file = false;
@@ -661,26 +668,37 @@ int FS::rm(std::string filepath)
 
   for (auto &dir : working_directory)
   {
-    if (dir.type == TYPE_FILE && dir.file_name == file)
+    if (dir.file_name == file && dir.type == TYPE_FILE)
     {
       // Mark dir_entry as empty
       dir.type = TYPE_EMPTY;
       current_block = dir.first_blk;
       found_file = true;
+      std::cout << "file" << std::endl;
       break;
     }
-    if (dir.type == TYPE_DIR && dir.file_name == file)
+    else if (dir.file_name == file && dir.type == TYPE_DIR)
     {
       // Check that directory doesn't have any files/directories
-      disk.read(dir.first_blk, (uint8_t *)working_directory);
-      for (auto &dir2 : working_directory)
+      dir_entry temp_working_directory[BLOCK_SIZE / 64];
+      disk.read(dir.first_blk, (uint8_t *)temp_working_directory);
+      for (auto &dir2 : temp_working_directory)
       {
         if (dir2.type != TYPE_EMPTY && std::string(dir2.file_name) != "..")
         {
+          if (std::string(dir2.file_name) != "/")
+          {
+            std::cout << "Cannot remove root" << std::endl;
+            return -1;
+          }
           std::cout << "Directory " << filepath << " is not empty" << std::endl;
           return -1;
         }
       }
+
+      // Mark dir_entry as empty
+      dir.type = TYPE_EMPTY;
+      current_block = dir.first_blk;
       found_dir = true;
       break;
     }
@@ -692,6 +710,10 @@ int FS::rm(std::string filepath)
     return -1;
   }
 
+  // Write to working directory
+  disk.write(temp_cwd, (uint8_t *)working_directory);
+
+  // printFAT();
   // Free FAT entries
   do
   {
@@ -702,10 +724,7 @@ int FS::rm(std::string filepath)
 
   // Write to FAT
   disk.write(FAT_BLOCK, (uint8_t *)fat);
-
-  // Write to working directory
-  disk.write(temp_cwd, (uint8_t *)working_directory);
-
+  // printFAT();
   return 0;
 }
 
@@ -714,8 +733,6 @@ int FS::rm(std::string filepath)
 int FS::append(std::string filepath1, std::string filepath2)
 {
   std::cout << "FS::append(" << filepath1 << "," << filepath2 << ")\n";
-
-  // TODO: Update this for directories.
 
   // Read working directory block and FAT
   disk.read(cwd, (uint8_t *)working_directory);
@@ -851,12 +868,15 @@ int FS::mkdir(std::string dirpath)
   std::string new_directory = filepath.back();
   filepath.pop_back();
 
+  // int temp_cwd = cwd;
+  // if (filepath.length())
   int temp_cwd = traverseToDir(filepath);
-  // filepath = interpretFilepath(new_directory);
-  // int success = traverseToDir(filepath);
 
   if (temp_cwd == -1)
+  {
+    std::cout << "Invalid path " << dirpath << std::endl;
     return -1;
+  }
 
   disk.read(temp_cwd, (uint8_t *)working_directory);
 
@@ -885,11 +905,9 @@ int FS::mkdir(std::string dirpath)
   dir_ent.type = TYPE_DIR;
   dir_ent.access_rights = READ | WRITE | EXECUTE;
 
-  updateFAT(dir_ent.first_blk, dir_ent.size);
-
   // Write FAT to disk
+  updateFAT(dir_ent.first_blk, dir_ent.size);
   disk.write(FAT_BLOCK, (uint8_t *)fat);
-
   // printFAT();
 
   // Write to working directory block
@@ -937,9 +955,12 @@ int FS::cd(std::string dirpath)
   disk.read(cwd, (uint8_t *)working_directory);
   temp = traverseToDir(filepath);
 
-  std::cout << temp << std::endl;
-  if (temp == -1)
+  // std::cout << temp << std::endl;
+  if (temp == -1) // || temp >= BLOCK_SIZE
+  {
+    std::cout << "Invalid path " << dirpath << std::endl;
     return -1;
+  }
   cwd = temp;
 
   return 0;
@@ -1140,7 +1161,7 @@ std::string FS::accessRightsToString(uint8_t access_rights)
 
   for (int i = 0; i < rwx.length(); i++)
   {
-    if ((access_rights & rights[i]) == rights[i]) // bitwise and
+    if ((access_rights & rights[i]) == rights[i]) 
       rwx[i] = rwx_chars[i];
   }
 
