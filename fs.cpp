@@ -4,9 +4,7 @@
 
 // TODO:
 /*
-  cp: update to handle copy to directory
   create general findDir function
-  ls: save tuples (file_name, size) to a vector and then print sorted alphabetically?
   "the access rights on a directory must be correct for various file operations
   (e.g., moving/copying a file to a directory requires write access on that directory), etc"
 */
@@ -120,7 +118,6 @@ int FS::create(std::string filepath)
   int temp_cwd = cwd;
   if (filepath_vec.size())
     temp_cwd = traverseToDir(filepath_vec);
-
   if (temp_cwd == -1 || temp_cwd >= BLOCK_SIZE)
   {
     std::cout << "Invalid path " << filepath << std::endl;
@@ -332,17 +329,21 @@ int FS::ls()
     if (dir.type != TYPE_EMPTY && std::string(dir.file_name) != "/" && std::string(dir.file_name) != "..")
     {
       std::string rwx = accessRightsToString(dir.access_rights);
+      std::string type = "";
+
+      if (dir.type == TYPE_DIR)
+        type = "dir";
+      else if (dir.type == TYPE_FILE)
+        type = "file";
 
       std::cout << std::left << std::setw(dir_name_width) << std::setfill(' ') << std::string(dir.file_name);
-      std::cout << std::left << std::setw(6) << std::setfill(' ') << "dir";
+      std::cout << std::left << std::setw(6) << std::setfill(' ') << type;
       std::cout << std::left << std::setw(14) << std::setfill(' ') << rwx;
 
       if (dir.type == TYPE_DIR)
-        std::cout << std::left << std::setw(10) << std::setfill(' ') << "-";
+        std::cout << std::left << std::setw(10) << std::setfill(' ') << "-" << std::endl;
       else if (dir.type == TYPE_FILE)
-        std::cout << std::left << std::setw(10) << std::setfill(' ') << "-";
-      
-      std::cout << std::endl;
+        std::cout << std::left << std::setw(10) << std::setfill(' ') << dir.size << std::endl;
     }
   }
   std::cout << std::endl;
@@ -674,7 +675,6 @@ int FS::rm(std::string filepath)
       dir.type = TYPE_EMPTY;
       current_block = dir.first_blk;
       found_file = true;
-      std::cout << "file" << std::endl;
       break;
     }
     else if (dir.file_name == file && dir.type == TYPE_DIR)
@@ -686,7 +686,7 @@ int FS::rm(std::string filepath)
       {
         if (dir2.type != TYPE_EMPTY && std::string(dir2.file_name) != "..")
         {
-          if (std::string(dir2.file_name) != "/")
+          if (std::string(dir2.file_name) == "/")
           {
             std::cout << "Cannot remove root" << std::endl;
             return -1;
