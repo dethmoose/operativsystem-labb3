@@ -4,9 +4,15 @@
 
 // TODO:
 /*
-  create general findDir function
-  "the access rights on a directory must be correct for various file operations
-  (e.g., moving/copying a file to a directory requires write access on that directory), etc"
+  * create general findDir function
+  * "the access rights on a directory must be correct for various file operations
+    (e.g., moving/copying a file to a directory requires write access on that directory), etc"
+  * "it should not be possible to create a new file / directory with the same name as an existing file/directory,
+    a directory and a file cannot have the same name (leads to a number of strange behviors and errors)"
+      - filenames have to be unique for the entire FS or just within a directory?
+  * see if createDirEntry can be used in more functions
+  * check that the directory is not full when creating a file 
+  * mv to directory
 */
 
 FS::FS()
@@ -42,9 +48,7 @@ int FS::format()
   // Erase diskfile.bin for good
   uint8_t null_block[BLOCK_SIZE] = {0};
   for (int i = 0; i < BLOCK_SIZE / 2; i++)
-  {
     disk.write(i, null_block);
-  }
 
   // Initialize FAT
   fat[ROOT_BLOCK] = FAT_EOF;
@@ -124,19 +128,31 @@ int FS::create(std::string filepath)
     return -1;
   }
 
+  // bool full_dir = true;
   for (auto &dir : working_directory)
   {
-    if (dir.file_name == new_filename && dir.type != TYPE_EMPTY)
+    if (dir.type != TYPE_EMPTY && dir.file_name == new_filename)
     {
       std::cout << new_filename << " already exists" << std::endl;
       return -1;
     }
+    // TODO: also make sure that the directory has an empty dir_entry to give to the new file
+    // else if (full_dir && dir.type == TYPE_EMPTY)
+      // full_dir = false;
   }
+
+  // if (full_dir)
+  // {
+  //   std::cout << "Full directory" << std::endl;
+  //   return -1;
+  // }
 
   int access;
   if (access = getDirAccessRights(temp_cwd) == -1) // unsigned int so does -1 work? added comment in getDirAccessRights
+  {
+    std::cout << "Error access" << std::endl;
     return -1;
-
+  }
   if (access & WRITE != WRITE)
   {
     std::cout << "No writing permission in directory" << std::endl;
@@ -186,28 +202,23 @@ int FS::create(std::string filepath)
   while (current_block != FAT_EOF)
   {
     char block[BLOCK_SIZE] = {0};
+    index = counter * BLOCK_SIZE;
+
     if (fat[current_block] != FAT_EOF)
     {
       for (int j = 0; j < BLOCK_SIZE; j++)
-      {
-        index = counter * BLOCK_SIZE;
         block[j] = data_str[index + j];
-      }
     }
     else
     {
       for (int j = 0; j < size % BLOCK_SIZE; j++)
-      {
-        index = counter * BLOCK_SIZE;
         block[j] = data_str[index + j];
-      }
     }
+
     disk.write(current_block, (uint8_t *)block);
     current_block = fat[current_block];
     counter++;
   }
-
-  // printFAT();
 
   // Write to cwd block
   dir_entry *ptr = &dir_ent;
@@ -326,7 +337,7 @@ int FS::ls()
 
   for (auto &dir : working_directory)
   {
-    if (dir.type != TYPE_EMPTY && std::string(dir.file_name) != "/" && std::string(dir.file_name) != "..")
+    if (dir.type != TYPE_EMPTY && std::string(dir.file_name) != "/")
     {
       std::string rwx = accessRightsToString(dir.access_rights);
       std::string type = "";
@@ -370,19 +381,20 @@ int FS::cp(std::string sourcepath, std::string destpath)
   dest_vec.pop_back();
 
   int temp_cwd = cwd;
-  if (source_vec.size())
-    temp_cwd = traverseToDir(source_vec);
-
+  // if (source_vec.size())             // it doesn't happen anything if the vector is empty
+  temp_cwd = traverseToDir(source_vec); // traverseToDir returns cwd if empty input vector
+ 
   // Find sourcepath, make sure destpath doesn't exist
   bool found_source_dir = false, found_dest_dir = false;
   uint32_t size;
   uint16_t source_block;
   uint8_t type, access_rights;
+
   for (auto &dir : working_directory)
   {
     if (dir.file_name == source)
     {
-      if (dir.access_rights & READ != READ)
+      if ((dir.access_rights & READ) != READ)
       {
         std::cout << "Missing read permission on " << source << std::endl;
         return -1;
@@ -403,12 +415,14 @@ int FS::cp(std::string sourcepath, std::string destpath)
   }
 
   if (dest_vec.size())
+  {
     temp_cwd = traverseToDir(dest_vec);
-  // else
-  // {
-  //   temp_cwd = cwd                   // what if source had a path but dest should be in original cwd?
-  //   disk.read(cwd, (uint8_t *)working_directory);
-  // }
+  }
+  else // If source had a path but dest should be in original cwd
+  {
+    disk.read(cwd, (uint8_t *)working_directory);
+    temp_cwd = cwd;
+  }
 
   // What if destination is a directory?
   bool is_dir = false;
@@ -419,7 +433,7 @@ int FS::cp(std::string sourcepath, std::string destpath)
       found_dest_dir = true;
       if (dir.type = TYPE_DIR)
       {
-        if (dir.access_rights & WRITE != WRITE)
+        if ((dir.access_rights & WRITE) != WRITE)
         {
           std::cout << "Missing write permission on " << destination << std::endl;
           return -1;
@@ -499,9 +513,9 @@ int FS::mv(std::string sourcepath, std::string destpath)
   std::vector<std::string> dest_vec = interpretFilepath(destpath);
 
   std::string source = source_vec.back();
-  std::string destination = source_vec.back();
-
   source_vec.pop_back();
+
+  std::string destination = dest_vec.back();
   dest_vec.pop_back();
 
   dir_entry temp1;
@@ -560,7 +574,7 @@ int FS::mv(std::string sourcepath, std::string destpath)
 
       if (dir.type == TYPE_FILE)
       {
-        std::cout << "File" << destination << " already exists" << std::endl;
+        std::cout << "File " << destination << " already exists" << std::endl;
         return -1;
       }
       else // TYPE_DIR
@@ -632,8 +646,6 @@ int FS::rm(std::string filepath)
 {
   std::cout << "FS::rm(" << filepath << ")\n";
 
-  // TODO should not be possible to remove directory the user stands in
-
   // Read working directory block and FAT
   disk.read(cwd, (uint8_t *)working_directory);
   disk.read(FAT_BLOCK, (uint8_t *)fat);
@@ -679,22 +691,29 @@ int FS::rm(std::string filepath)
     }
     else if (dir.file_name == file && dir.type == TYPE_DIR)
     {
+      // Check that user isn't trying to remove cwd
+      if (dir.first_blk == cwd)
+      {
+        std::cout << "Cannot remove current working directory" << std::endl;
+        return -1;
+      }
+
       // Check that directory doesn't have any files/directories
-      dir_entry temp_working_directory[BLOCK_SIZE / 64];
-      disk.read(dir.first_blk, (uint8_t *)temp_working_directory);
-      for (auto &dir2 : temp_working_directory)
+      disk.read(dir.first_blk, (uint8_t *)working_directory);
+      for (auto &dir2 : working_directory)
       {
         if (dir2.type != TYPE_EMPTY && std::string(dir2.file_name) != "..")
         {
           if (std::string(dir2.file_name) == "/")
           {
-            std::cout << "Cannot remove root" << std::endl;
+            std::cout << "Cannot remove root directory" << std::endl;
             return -1;
           }
           std::cout << "Directory " << filepath << " is not empty" << std::endl;
           return -1;
         }
       }
+      disk.read(temp_cwd, (uint8_t *)working_directory);
 
       // Mark dir_entry as empty
       dir.type = TYPE_EMPTY;
@@ -713,7 +732,6 @@ int FS::rm(std::string filepath)
   // Write to working directory
   disk.write(temp_cwd, (uint8_t *)working_directory);
 
-  // printFAT();
   // Free FAT entries
   do
   {
@@ -724,7 +742,7 @@ int FS::rm(std::string filepath)
 
   // Write to FAT
   disk.write(FAT_BLOCK, (uint8_t *)fat);
-  // printFAT();
+
   return 0;
 }
 
@@ -741,19 +759,40 @@ int FS::append(std::string filepath1, std::string filepath2)
   std::vector<std::string> file1_vec = interpretFilepath(filepath1);
   std::vector<std::string> file2_vec = interpretFilepath(filepath2);
 
+  std::string file1 = file1_vec.back();
+  file1_vec.pop_back();
+
+  std::string file2 = file2_vec.back();
+  file2_vec.pop_back();
+
   // Search for filepaths, exit if not found
   int filepath1_block, filepath2_block, size1, size2;
   int no_found = 0;
-  int temp_cwd = traverseToDir(file1_vec);
+
+  int temp_cwd = cwd;
+  if (file1_vec.size())
+    temp_cwd = traverseToDir(file1_vec);
+
+  if (temp_cwd == -1)
+  {
+    std::cout << "Invalid path " << filepath1 << std::endl;
+    return -1;
+  }
 
   for (auto &dir : working_directory)
   {
-    if (std::string(dir.file_name) == file1_vec.back())
+    if (std::string(dir.file_name) == file1 && dir.type != TYPE_EMPTY)
     {
-      // Check for READ permission
-      if (dir.access_rights & READ != READ)
+      if (dir.type == TYPE_DIR)
       {
-        std::cout << file1_vec.back() << " does not have read permission" << std::endl;
+        std::cout << file1 << " is a directory" << std::endl;
+        return -1;
+      }
+
+      // Check for READ permission
+      if ((dir.access_rights & READ) != READ)
+      {
+        std::cout << file1 << " does not have read permission" << std::endl;
         return -1;
       }
 
@@ -763,15 +802,33 @@ int FS::append(std::string filepath1, std::string filepath2)
     }
   }
 
-  temp_cwd = traverseToDir(file2_vec);
+  temp_cwd = cwd;
+  disk.read(cwd, (uint8_t *)working_directory);
+
+  if (file2_vec.size())
+  {
+    temp_cwd = traverseToDir(file2_vec);
+  }
+
+  if (temp_cwd == -1)
+  {
+    std::cout << "Invalid path " << filepath2 << std::endl;
+    return -1;
+  }
+
   for (auto &dir : working_directory)
   {
-    if (std::string(dir.file_name) == file2_vec.back())
+    if (std::string(dir.file_name) == file2 && dir.type != TYPE_EMPTY)
     {
-      // Check for READ and WRITE permission
-      if (dir.access_rights & (READ | WRITE) != (READ | WRITE))
+      if (dir.type == TYPE_DIR)
       {
-        std::cout << file2_vec.back() << " does not have read and write permission" << std::endl;
+        std::cout << file2 << " is a directory" << std::endl;
+        return -1;
+      }
+
+      if ((dir.access_rights & (READ | WRITE)) != (READ | WRITE))
+      {
+        std::cout << file2 << " does not have read and write permission" << std::endl;
         return -1;
       }
 
@@ -787,7 +844,10 @@ int FS::append(std::string filepath1, std::string filepath2)
   // Check if enough free blocks
   int no_free_blocks = getNoFreeBlocks();
   if (no_free_blocks < size1 / BLOCK_SIZE + 1)
+  {
+    std::cout << "No enough free blocks on disk" << std::endl;
     return -1;
+  }
 
   // Find end of filepath2
   while (fat[filepath2_block] != FAT_EOF)
@@ -805,7 +865,7 @@ int FS::append(std::string filepath1, std::string filepath2)
   while (current_block != FAT_EOF)
   {
     disk.read(current_block, (uint8_t *)block);
-    filepath1_data.append(block); // append char* to string
+    filepath1_data.append(block);
 
     current_block = fat[current_block];
   }
@@ -842,14 +902,14 @@ int FS::append(std::string filepath1, std::string filepath2)
   // Update filepath2.size in the working directory block
   for (auto &dir : working_directory)
   {
-    if (std::string(dir.file_name) == filepath2)
+    if (std::string(dir.file_name) == file2)
     {
       dir.size = size1 + size2;
       break;
     }
   }
 
-  disk.write(cwd, (uint8_t *)working_directory);
+  disk.write(temp_cwd, (uint8_t *)working_directory);
 
   return 0;
 }
@@ -868,9 +928,9 @@ int FS::mkdir(std::string dirpath)
   std::string new_directory = filepath.back();
   filepath.pop_back();
 
-  // int temp_cwd = cwd;
-  // if (filepath.length())
-  int temp_cwd = traverseToDir(filepath);
+  int temp_cwd = cwd;
+  if (filepath.size())
+    temp_cwd = traverseToDir(filepath);
 
   if (temp_cwd == -1)
   {
@@ -1050,7 +1110,6 @@ int FS::chmod(std::string accessrights, std::string filepath)
   return 0;
 }
 
-// find free block
 int FS::findFirstFreeBlock()
 {
   int block_no = -1;
@@ -1066,7 +1125,6 @@ int FS::findFirstFreeBlock()
   return block_no;
 }
 
-// number of free blocks on disk
 int FS::getNoFreeBlocks()
 {
   int number = 0;
@@ -1080,7 +1138,6 @@ int FS::getNoFreeBlocks()
   return number;
 }
 
-// create dir_entry
 int FS::createDirEntry(dir_entry *de, int dir_block)
 {
   int not_empty = 0;
@@ -1152,7 +1209,6 @@ std::vector<std::string> FS::interpretFilepath(std::string dirpath)
   return path_vec;
 }
 
-// Get access rights string
 std::string FS::accessRightsToString(uint8_t access_rights)
 {
   std::string rwx = "---";
@@ -1215,7 +1271,7 @@ int FS::traverseToDir(std::vector<std::string> filepath)
         temp = dir.first_blk;
         dir_found = true;
 
-        if (dir.access_rights & EXECUTE == EXECUTE)
+        if ((dir.access_rights & EXECUTE) == EXECUTE)
           execute = true;
 
         break;
