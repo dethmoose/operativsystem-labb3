@@ -2,18 +2,6 @@
 #include <sstream>
 #include "fs.h"
 
-// TODO:
-/*
-  * create general findDir function
-  * "the access rights on a directory must be correct for various file operations
-    (e.g., moving/copying a file to a directory requires write access on that directory), etc"
-  * "it should not be possible to create a new file / directory with the same name as an existing file/directory,
-    a directory and a file cannot have the same name (leads to a number of strange behviors and errors)"
-      - filenames have to be unique for the entire FS or just within a directory?
-  * see if createDirEntry can be used in more functions
-  * check that the directory is not full when creating a file 
-  * mv to directory
-*/
 
 FS::FS()
 {
@@ -383,7 +371,7 @@ int FS::cp(std::string sourcepath, std::string destpath)
   int temp_cwd = cwd;
   // if (source_vec.size())             // it doesn't happen anything if the vector is empty
   temp_cwd = traverseToDir(source_vec); // traverseToDir returns cwd if empty input vector
- 
+
   // Find sourcepath, make sure destpath doesn't exist
   bool found_source_dir = false, found_dest_dir = false;
   uint32_t size;
@@ -428,10 +416,10 @@ int FS::cp(std::string sourcepath, std::string destpath)
   bool is_dir = false;
   for (auto &dir : working_directory)
   {
-    if (dir.file_name == destination)
+    if (dir.file_name == destination && dir.type != TYPE_EMPTY)
     {
       found_dest_dir = true;
-      if (dir.type = TYPE_DIR)
+      if (dir.type == TYPE_DIR)
       {
         if ((dir.access_rights & WRITE) != WRITE)
         {
@@ -494,16 +482,11 @@ int FS::cp(std::string sourcepath, std::string destpath)
   return 0;
 }
 
-// TODO NOT DONE FIX THIS
 //  mv <sourcepath> <destpath> renames the file <sourcepath> to the name <destpath>,
 //  or moves the file <sourcepath> to the directory <destpath> (if dest is a directory)
 int FS::mv(std::string sourcepath, std::string destpath)
 {
   std::cout << "FS::mv(" << sourcepath << "," << destpath << ")\n";
-
-  // Is it better to start searching for destination so we know if we're renaming or
-  // moving the dir_entry to another directory, before searching for the source?
-  // Could then rename directly if dest was a file
 
   // Read working directory block and FAT
   disk.read(cwd, (uint8_t *)working_directory);
@@ -518,9 +501,6 @@ int FS::mv(std::string sourcepath, std::string destpath)
   std::string destination = dest_vec.back();
   dest_vec.pop_back();
 
-  dir_entry temp1;
-  dir_entry temp2;
-
   int source_cwd = cwd;
   if (source_vec.size())
     source_cwd = traverseToDir(source_vec);
@@ -531,31 +511,6 @@ int FS::mv(std::string sourcepath, std::string destpath)
     return -1;
   }
 
-  // Search for sourcepath
-  bool found_source_dir = false, found_dest_dir = false, destination_is_dir = false;
-
-  for (auto &dir : working_directory)
-  {
-    if (dir.file_name == source)
-    {
-      if (dir.type == TYPE_DIR)
-      {
-        std::cout << source << " is a directory" << std::endl;
-        return -1;
-      }
-
-      found_source_dir = true;
-      temp1 = dir;
-    }
-  }
-
-  if (!found_source_dir)
-  {
-    std::cout << sourcepath << " does not exist" << std::endl;
-    return -1;
-  }
-
-  // Search for destpath
   int dest_cwd = cwd;
   if (dest_vec.size())
     dest_cwd = traverseToDir(dest_vec);
@@ -566,77 +521,58 @@ int FS::mv(std::string sourcepath, std::string destpath)
     return -1;
   }
 
-  for (auto &dir : working_directory)
-  {
-    if (dir.type != TYPE_EMPTY && dir.file_name == destination)
-    {
-      found_dest_dir = true;
+  disk.read(source_cwd, (uint8_t *)working_directory);
 
-      if (dir.type == TYPE_FILE)
+  bool found_dest_dir = false, destination_is_dir = false, source_found = false;
+  for (auto &source_dir : working_directory)
+  {
+
+    // Find source_dir in the source working Directory
+    if (source_dir.file_name == source && source_dir.type != TYPE_EMPTY)
+    {
+      source_found = true;
+      dir_entry temp_source = source_dir;
+
+      disk.read(dest_cwd, (uint8_t *)working_directory);
+      // Find the dest_dir in the destianation working directory
+      for (auto &dest_dir : working_directory)
       {
-        std::cout << "File " << destination << " already exists" << std::endl;
-        return -1;
+        if (dest_dir.file_name == destination && dest_dir.type != TYPE_EMPTY)
+        {
+          found_dest_dir = true;
+          if (dest_dir.type == TYPE_DIR) {
+            int temp_blk = dest_dir.first_blk;
+            disk.read(dest_dir.first_blk, (uint8_t *)working_directory);
+            // Search for file or directory in destination with the same name
+            for (auto & dir : working_directory)
+              if (dir.file_name == source && dir.type != TYPE_EMPTY)
+                return -1;
+            // No identical filenames, create a new dir_entry in destination, copy of source
+            createDirEntry(&temp_source, temp_blk);
+
+            // Change source to empty
+            disk.read(source_cwd, (uint8_t*)working_directory);
+
+            source_dir.type = TYPE_EMPTY;
+            disk.write(source_cwd, (uint8_t*)working_directory);
+            break;
+          }
+          else if (dest_dir.type == TYPE_FILE)
+            return -1;
+        }
       }
-      else // TYPE_DIR
+      if (!found_dest_dir)
       {
-        // If destination is a directory, need some way to find the directory block
-        // to move the dir_entry from root_block to new directory. Not necessary to move file blocks.
-        destination_is_dir = true;
+        // change source filename to destination
+        std::strcpy(source_dir.file_name, destination.c_str());
+        disk.write(source_cwd, (uint8_t*)working_directory);
       }
       break;
     }
   }
 
-  // Do the mv
-  disk.read(source_cwd, (uint8_t *)working_directory);
-
-  if (!found_dest_dir) // Rename source to destination
-  {
-    for (auto &dir : working_directory) // repeating code
-    {
-      if (dir.type != TYPE_EMPTY && dir.file_name == source)
-      {
-        std::strcpy(dir.file_name, destination.c_str());
-        disk.write(source_cwd, (uint8_t *)working_directory);
-        break;
-      }
-    }
-  }
-  else if (found_dest_dir && destination_is_dir) // Move source to destination
-  {
-    for (auto &dir : working_directory) // repeating code
-    {
-      if (dir.type != TYPE_EMPTY && dir.file_name == source)
-      {
-        dir.type = TYPE_EMPTY;
-        disk.write(source_cwd, (uint8_t *)working_directory);
-        break;
-      }
-    }
-    // source dir_entry in temp1
-    disk.read(dest_cwd, (uint8_t *)working_directory);
-    for (auto &dir : working_directory)
-    {
-      if (dir.type == TYPE_EMPTY)
-      {
-        std::strcpy(dir.file_name, temp1.file_name);
-        dir.size = temp1.size;
-        dir.first_blk = temp1.first_blk;
-        dir.access_rights = temp1.access_rights;
-        dir.type = temp1.type;
-
-        disk.write(dest_cwd, (uint8_t *)working_directory);
-        break;
-      }
-    }
-  }
-  else // for debugging
-  {
-    std::cout << "Error (last else in mv)" << std::endl;
-    return -1;
-  }
-
-  // disk.write(cwd, (uint8_t *)working_directory);
+  if (!source_found)
+      return -1; // Source is not found.
 
   return 0;
 }
@@ -655,9 +591,7 @@ int FS::rm(std::string filepath)
   path_vec.pop_back();
 
   // Go to path
-  int temp_cwd = cwd;
-  if (path_vec.size())
-    temp_cwd = traverseToDir(path_vec);
+  int temp_cwd = traverseToDir(path_vec);
 
   if (temp_cwd == -1)
   {
@@ -769,9 +703,7 @@ int FS::append(std::string filepath1, std::string filepath2)
   int filepath1_block, filepath2_block, size1, size2;
   int no_found = 0;
 
-  int temp_cwd = cwd;
-  if (file1_vec.size())
-    temp_cwd = traverseToDir(file1_vec);
+  int temp_cwd = traverseToDir(file1_vec);
 
   if (temp_cwd == -1)
   {
@@ -802,13 +734,9 @@ int FS::append(std::string filepath1, std::string filepath2)
     }
   }
 
-  temp_cwd = cwd;
   disk.read(cwd, (uint8_t *)working_directory);
 
-  if (file2_vec.size())
-  {
-    temp_cwd = traverseToDir(file2_vec);
-  }
+  temp_cwd = traverseToDir(file2_vec);
 
   if (temp_cwd == -1)
   {
@@ -854,7 +782,7 @@ int FS::append(std::string filepath1, std::string filepath2)
     filepath2_block = fat[filepath2_block];
 
   // Update FAT entries for filepath2
-  updateFAT(filepath2_block, size1); // May allocate one too many fat entries, TODO
+  updateFAT(filepath2_block, size1); // May allocate one too many fat entries
   disk.write(FAT_BLOCK, (uint8_t *)fat);
 
   // Read filepath1 data
@@ -928,9 +856,7 @@ int FS::mkdir(std::string dirpath)
   std::string new_directory = filepath.back();
   filepath.pop_back();
 
-  int temp_cwd = cwd;
-  if (filepath.size())
-    temp_cwd = traverseToDir(filepath);
+  int temp_cwd = traverseToDir(filepath);
 
   if (temp_cwd == -1)
   {
@@ -1010,18 +936,16 @@ int FS::cd(std::string dirpath)
   // Interpret string to determine the steps required
   std::vector<std::string> filepath = interpretFilepath(dirpath);
 
-  int temp = cwd;
-
   disk.read(cwd, (uint8_t *)working_directory);
-  temp = traverseToDir(filepath);
+  int temp_cwd = traverseToDir(filepath);
 
   // std::cout << temp << std::endl;
-  if (temp == -1) // || temp >= BLOCK_SIZE
+  if (temp_cwd == -1) // || temp >= BLOCK_SIZE
   {
     std::cout << "Invalid path " << dirpath << std::endl;
     return -1;
   }
-  cwd = temp;
+  cwd = temp_cwd;
 
   return 0;
 }
@@ -1047,8 +971,6 @@ int FS::pwd()
     // Search in parent directory for current directory's filename
     for (auto &dir_ent : working_directory)
     {
-      if (dir_ent.file_name == "..")
-        std::cout << "found '..' in directory" << std::endl; // never prints?
       if (dir_ent.first_blk == current_dir)
       {
         path = dir_ent.file_name + path;
@@ -1217,7 +1139,7 @@ std::string FS::accessRightsToString(uint8_t access_rights)
 
   for (int i = 0; i < rwx.length(); i++)
   {
-    if ((access_rights & rights[i]) == rights[i]) 
+    if ((access_rights & rights[i]) == rights[i])
       rwx[i] = rwx_chars[i];
   }
 

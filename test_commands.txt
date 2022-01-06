@@ -91,7 +91,7 @@ ls
 // gå tillbaka till rootkatalogen
 cd ..
 pwd
-// rm på en katalog ska ge felmeddelande, kontrollera att katalogen ligger kvar
+// rm på en katalog, kontrollera om katalogen ligger kvar
 rm d2
 ls
 
