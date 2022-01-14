@@ -30,8 +30,6 @@ FS::~FS()
 // formats the disk, i.e., creates an empty file system
 int FS::format()
 {
-  std::cout << "FS::format()\n";
-
   cwd = ROOT_BLOCK;
 
   // Erase diskfile.bin for good
@@ -85,8 +83,6 @@ int FS::format()
 // written on the following rows (ended with an empty row)
 int FS::create(std::string filepath)
 {
-  std::cout << "FS::create(" << filepath << ")\n";
-
   std::vector<std::string> filepath_vec = interpretFilepath(filepath);
   std::string new_filename = filepath_vec.back();
   filepath_vec.pop_back();
@@ -212,8 +208,6 @@ int FS::create(std::string filepath)
 // cat <filepath> reads the content of a file and prints it on the screen
 int FS::cat(std::string filepath)
 {
-  std::cout << "FS::cat(" << filepath << ")\n";
-
   // Read working directory block and FAT
   disk.read(cwd, (uint8_t *)working_directory);
   disk.read(FAT_BLOCK, (uint8_t *)fat);
@@ -295,8 +289,6 @@ int FS::cat(std::string filepath)
 // ls lists the content in the currect directory (files and sub-directories)
 int FS::ls()
 {
-  std::cout << "FS::ls()\n";
-
   // Read working directory block
   disk.read(cwd, (uint8_t *)working_directory);
 
@@ -319,8 +311,9 @@ int FS::ls()
 
   for (auto &dir : working_directory)
   {
-    if (dir.type != TYPE_EMPTY && std::string(dir.file_name) != "/")
+    if (dir.type != TYPE_EMPTY)
     {
+
       std::string rwx = accessRightsToString(dir.access_rights);
       std::string type = "";
 
@@ -328,8 +321,10 @@ int FS::ls()
         type = "dir";
       else if (dir.type == TYPE_FILE)
         type = "file";
-
-      std::cout << std::left << std::setw(dir_name_width) << std::setfill(' ') << std::string(dir.file_name);
+      if (std::string(dir.file_name) == "/")
+        std::cout << std::left << std::setw(dir_name_width) << std::setfill(' ') << "..";
+      else
+        std::cout << std::left << std::setw(dir_name_width) << std::setfill(' ') << std::string(dir.file_name);
       std::cout << std::left << std::setw(6) << std::setfill(' ') << type;
       std::cout << std::left << std::setw(14) << std::setfill(' ') << rwx;
 
@@ -347,8 +342,6 @@ int FS::ls()
 // <sourcepath> to a new file <destpath>
 int FS::cp(std::string sourcepath, std::string destpath)
 {
-  std::cout << "FS::cp(" << sourcepath << "," << destpath << ")\n";
-
   // Read working directory block and FAT from disk
   disk.read(cwd, (uint8_t *)working_directory);
   disk.read(FAT_BLOCK, (uint8_t *)fat);
@@ -362,9 +355,7 @@ int FS::cp(std::string sourcepath, std::string destpath)
   std::string destination = dest_vec.back();
   dest_vec.pop_back();
 
-  int temp_cwd = cwd;
-  // if (source_vec.size())             // it doesn't happen anything if the vector is empty
-  temp_cwd = traverseToDir(source_vec); // traverseToDir returns cwd if empty input vector
+  int temp_cwd = traverseToDir(source_vec); // traverseToDir returns cwd if empty input vector
 
   // Find sourcepath, make sure destpath doesn't exist
   bool found_source_dir = false, found_dest_dir = false;
@@ -480,11 +471,12 @@ int FS::cp(std::string sourcepath, std::string destpath)
 //  or moves the file <sourcepath> to the directory <destpath> (if dest is a directory)
 int FS::mv(std::string sourcepath, std::string destpath)
 {
-  std::cout << "FS::mv(" << sourcepath << "," << destpath << ")\n";
+  // ? When using like '/a/b/filename newname', should filename be moved to the cwd and renamed, or in place?
+  // ? Don't think so.
+  // TODO destination ".." in root should not change the name to ".."
 
-  // Read working directory block and FAT
+  // Read working directory block
   disk.read(cwd, (uint8_t *)working_directory);
-  disk.read(FAT_BLOCK, (uint8_t *)fat); // don't need FAT?
 
   std::vector<std::string> source_vec = interpretFilepath(sourcepath);
   std::vector<std::string> dest_vec = interpretFilepath(destpath);
@@ -495,9 +487,7 @@ int FS::mv(std::string sourcepath, std::string destpath)
   std::string destination = dest_vec.back();
   dest_vec.pop_back();
 
-  int source_cwd = cwd;
-  if (source_vec.size())
-    source_cwd = traverseToDir(source_vec);
+  int source_cwd = traverseToDir(source_vec);
 
   if (source_cwd == -1)
   {
@@ -505,8 +495,8 @@ int FS::mv(std::string sourcepath, std::string destpath)
     return -1;
   }
 
-  int dest_cwd = cwd;
-  if (dest_vec.size())
+  int dest_cwd = ROOT_BLOCK;
+  if (destination != "/")
     dest_cwd = traverseToDir(dest_vec);
 
   if (dest_cwd == -1)
@@ -515,51 +505,89 @@ int FS::mv(std::string sourcepath, std::string destpath)
     return -1;
   }
 
+  // TODO test if these access rights work.
+  uint8_t access_source = getDirAccessRights(source_cwd);
+  uint8_t access_dest = getDirAccessRights(dest_cwd);
+
+  if ((access_source & access_dest) & (WRITE | EXECUTE) != (WRITE | EXECUTE))
+  {
+    std::cout << "Missing permissions" << std::endl;
+    return -1;
+  }
+
   disk.read(source_cwd, (uint8_t *)working_directory);
 
-  bool found_dest_dir = false, destination_is_dir = false, source_found = false;
+  bool found_dest_dir = false, source_found = false;
   for (auto &source_dir : working_directory)
   {
-
     // Find source_dir in the source working Directory
-    if (source_dir.file_name == source && source_dir.type != TYPE_EMPTY)
+    if (std::string(source_dir.file_name) == source && source_dir.type != TYPE_EMPTY)
     {
       source_found = true;
+      // Save source_dir temporary while reading the destination working directory
       dir_entry temp_source = source_dir;
-
       disk.read(dest_cwd, (uint8_t *)working_directory);
-      // Find the dest_dir in the destianation working directory
+
+      // Find the dest_dir in the destination working directory
       for (auto &dest_dir : working_directory)
       {
-        if (dest_dir.file_name == destination && dest_dir.type != TYPE_EMPTY)
+
+        // Case: If file or directory already exist in the destination directory
+        if (std::string(dest_dir.file_name) == destination && dest_dir.type != TYPE_EMPTY)
         {
           found_dest_dir = true;
-          if (dest_dir.type == TYPE_DIR)
+
+          if (dest_dir.type == TYPE_DIR) // Case: If dir_entry is a directory, move source inside.
           {
+            // Save the block number of directory before reading it to the working_directory.
             int temp_blk = dest_dir.first_blk;
-            disk.read(dest_dir.first_blk, (uint8_t *)working_directory);
+            disk.read(temp_blk, (uint8_t *)working_directory);
+
             // Search for file or directory in destination with the same name
             for (auto &dir : working_directory)
               if (dir.file_name == source && dir.type != TYPE_EMPTY)
+              {
+                std::cout << source << " already exists in destination" << std::endl;
                 return -1;
-            // No identical filenames, create a new dir_entry in destination, copy of source
+              }
+
+            // If passed loop, no identical filenames, create a new dir_entry in destination, copy of source
             createDirEntry(&temp_source, temp_blk);
 
-            // Change source to empty
+            // Change source to empty, and write to disk
             disk.read(source_cwd, (uint8_t *)working_directory);
-
             source_dir.type = TYPE_EMPTY;
             disk.write(source_cwd, (uint8_t *)working_directory);
+
             break;
           }
-          else if (dest_dir.type == TYPE_FILE)
+          else // Case: If dir_entry is file, destination already exists, abort.
+          {
+            std::cout << destination << " already exists." << std::endl;
             return -1;
+          }
         }
+        // If reaching end of this loop: no file or directory named 'destination' in the dest_cwd.
       }
-      if (!found_dest_dir)
+
+      // Case: No destination found in dest_cwd, and only one argument. Same directory - change the name of source to dest.
+      if (!found_dest_dir && destination != "/" && !dest_vec.size())
       {
         // change source filename to destination
+        disk.read(source_cwd, (uint8_t *)working_directory);
         std::strcpy(source_dir.file_name, destination.c_str());
+        disk.write(source_cwd, (uint8_t *)working_directory);
+      }
+      else if (!found_dest_dir && destination != "/") // Case: No destination found in dest_cwd, but more than one argument - mv to another dir and change name.
+      {
+        // Move to destination dir and change name.
+        if (destination != "..")
+          std::strcpy(temp_source.file_name, destination.c_str());
+        createDirEntry(&temp_source, dest_cwd);
+
+        // Set source to empty
+        disk.read(source_cwd, (uint8_t *)working_directory);
+        source_dir.type = TYPE_EMPTY;
         disk.write(source_cwd, (uint8_t *)working_directory);
       }
       break;
@@ -567,7 +595,10 @@ int FS::mv(std::string sourcepath, std::string destpath)
   }
 
   if (!source_found)
-    return -1; // Source is not found.
+  {
+    std::cout << "Source not found" << std::endl;
+    return -1;
+  }
 
   return 0;
 }
@@ -575,8 +606,6 @@ int FS::mv(std::string sourcepath, std::string destpath)
 // rm <filepath> removes / deletes the file <filepath>
 int FS::rm(std::string filepath)
 {
-  std::cout << "FS::rm(" << filepath << ")\n";
-
   // Read working directory block and FAT
   disk.read(cwd, (uint8_t *)working_directory);
   disk.read(FAT_BLOCK, (uint8_t *)fat);
@@ -677,8 +706,6 @@ int FS::rm(std::string filepath)
 // the end of file <filepath2>. The file <filepath1> is unchanged.
 int FS::append(std::string filepath1, std::string filepath2)
 {
-  std::cout << "FS::append(" << filepath1 << "," << filepath2 << ")\n";
-
   // Read working directory block and FAT
   disk.read(cwd, (uint8_t *)working_directory);
   disk.read(FAT_BLOCK, (uint8_t *)fat);
@@ -747,9 +774,9 @@ int FS::append(std::string filepath1, std::string filepath2)
         return -1;
       }
 
-      if ((dir.access_rights & (READ | WRITE)) != (READ | WRITE))
+      if ((dir.access_rights & WRITE) != WRITE)
       {
-        std::cout << file2 << " does not have read and write permission" << std::endl;
+        std::cout << file2 << " does not have write permission" << std::endl;
         return -1;
       }
 
@@ -839,8 +866,6 @@ int FS::append(std::string filepath1, std::string filepath2)
 // in the current directory
 int FS::mkdir(std::string dirpath)
 {
-  std::cout << "FS::mkdir(" << dirpath << ")\n";
-
   // Read working directory block and FAT
   disk.read(cwd, (uint8_t *)working_directory);
   disk.read(FAT_BLOCK, (uint8_t *)fat);
@@ -923,8 +948,6 @@ int FS::mkdir(std::string dirpath)
 // cd <dirpath> changes the current (working) directory to the directory named <dirpath>
 int FS::cd(std::string dirpath)
 {
-  std::cout << "FS::cd(" << dirpath << ")\n";
-
   // Interpret string to determine the steps required
   std::vector<std::string> filepath = interpretFilepath(dirpath);
 
@@ -945,8 +968,6 @@ int FS::cd(std::string dirpath)
 // directory, including the currect directory name
 int FS::pwd()
 {
-  std::cout << "FS::pwd()\n";
-
   // Read working directory
   disk.read(cwd, (uint8_t *)working_directory);
   uint16_t current_dir = cwd;
@@ -984,8 +1005,6 @@ int FS::pwd()
 // file <filepath> to <accessrights>.
 int FS::chmod(std::string accessrights, std::string filepath)
 {
-  std::cout << "FS::chmod(" << accessrights << "," << filepath << ")\n";
-
   // Refresh working_directory
   disk.read(cwd, (uint8_t *)working_directory);
 
@@ -1169,11 +1188,19 @@ uint8_t FS::getDirAccessRights(int dir_block)
 int FS::traverseToDir(std::vector<std::string> filepath)
 {
   int temp = cwd;
+
   for (int i = 0; i < filepath.size(); i++)
   {
     if (filepath[i] == "/") // absolute path, start from ROOT_BLOCK
     {
       temp = ROOT_BLOCK;
+      disk.read(temp, (uint8_t *)working_directory);
+      continue;
+    }
+
+    if (filepath[i] == "..")
+    {
+      temp = working_directory[0].first_blk;
       disk.read(temp, (uint8_t *)working_directory);
       continue;
     }
