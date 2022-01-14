@@ -1024,7 +1024,7 @@ int FS::chmod(std::string accessrights, std::string filepath)
     if (std::string(dir.file_name) == filename && dir.type != TYPE_EMPTY)
     {
       found_dir = true;
-      dir.access_rights = std::stoi(accessrights, nullptr, 16); // hex, base 16
+      dir.access_rights = std::stoi(accessrights);
       disk.write(temp_cwd, (uint8_t *)working_directory);
     }
   }
