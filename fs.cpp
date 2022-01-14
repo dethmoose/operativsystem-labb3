@@ -19,8 +19,6 @@ FS::FS()
   {
     dir = dir_ent;
   }
-
-  // Maybe perform validation on diskfile.bin in the constructor. How??
 }
 
 FS::~FS()
@@ -58,7 +56,6 @@ int FS::format()
   dir_ent.access_rights = READ | WRITE | EXECUTE;
 
   // Add dir_entry first in root
-  // dir_entry* de_ptr = &dir_ent;
   working_directory[0] = dir_ent;
 
   // Change dir_entry object to be empty
@@ -471,10 +468,6 @@ int FS::cp(std::string sourcepath, std::string destpath)
 //  or moves the file <sourcepath> to the directory <destpath> (if dest is a directory)
 int FS::mv(std::string sourcepath, std::string destpath)
 {
-  // ? When using like '/a/b/filename newname', should filename be moved to the cwd and renamed, or in place?
-  // ? Don't think so.
-  // TODO destination ".." in root should not change the name to ".."
-
   // Read working directory block
   disk.read(cwd, (uint8_t *)working_directory);
 
@@ -505,7 +498,6 @@ int FS::mv(std::string sourcepath, std::string destpath)
     return -1;
   }
 
-  // TODO test if these access rights work.
   uint8_t access_source = getDirAccessRights(source_cwd);
   uint8_t access_dest = getDirAccessRights(dest_cwd);
 
@@ -563,7 +555,7 @@ int FS::mv(std::string sourcepath, std::string destpath)
           }
           else // Case: If dir_entry is file, destination already exists, abort.
           {
-            std::cout << destination << " already exists." << std::endl;
+            std::cout << "File " << destination << " already exists." << std::endl;
             return -1;
           }
         }
@@ -573,10 +565,13 @@ int FS::mv(std::string sourcepath, std::string destpath)
       // Case: No destination found in dest_cwd, and only one argument. Same directory - change the name of source to dest.
       if (!found_dest_dir && destination != "/" && !dest_vec.size())
       {
-        // change source filename to destination
-        disk.read(source_cwd, (uint8_t *)working_directory);
-        std::strcpy(source_dir.file_name, destination.c_str());
-        disk.write(source_cwd, (uint8_t *)working_directory);
+        // Change source filename to destination
+        if (destination != "..")
+        {
+          disk.read(source_cwd, (uint8_t *)working_directory);
+          std::strcpy(source_dir.file_name, destination.c_str());
+          disk.write(source_cwd, (uint8_t *)working_directory);
+        }
       }
       else if (!found_dest_dir && destination != "/") // Case: No destination found in dest_cwd, but more than one argument - mv to another dir and change name.
       {
@@ -741,7 +736,6 @@ int FS::append(std::string filepath1, std::string filepath2)
         return -1;
       }
 
-      // Check for READ permission
       if ((dir.access_rights & READ) != READ)
       {
         std::cout << file1 << " does not have read permission" << std::endl;
@@ -802,7 +796,7 @@ int FS::append(std::string filepath1, std::string filepath2)
     filepath2_block = fat[filepath2_block];
 
   // Update FAT entries for filepath2
-  updateFAT(filepath2_block, size1); // May allocate one too many fat entries
+  updateFAT(filepath2_block, size1);
   disk.write(FAT_BLOCK, (uint8_t *)fat);
 
   // Read filepath1 data
@@ -1053,7 +1047,6 @@ int FS::chmod(std::string accessrights, std::string filepath)
     std::cout << "File not found" << std::endl;
     return -1;
   }
-  // Write to disk
 
   return 0;
 }
@@ -1114,7 +1107,7 @@ int FS::createDirEntry(dir_entry *de, int dir_block)
 void FS::updateFAT(int block_start, uint32_t size)
 {
   int current_block;
-  for (int i = 0; i <= (size / BLOCK_SIZE); i++) // check later what happens if filesize == BLOCK_SIZE
+  for (int i = 0; i <= (size / BLOCK_SIZE); i++)
   {
     fat[block_start] = 1;
     current_block = block_start;
@@ -1132,7 +1125,6 @@ std::vector<std::string> FS::interpretFilepath(std::string dirpath)
     path_vec.push_back("/");
 
   // Interpret string to determine the steps required
-
   std::istringstream iss(dirpath);
   std::string path;
   while (std::getline(iss, path, delimiter))
