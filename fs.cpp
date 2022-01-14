@@ -1026,19 +1026,6 @@ int FS::chmod(std::string accessrights, std::string filepath)
       found_dir = true;
       dir.access_rights = std::stoi(accessrights, nullptr, 16); // hex, base 16
       disk.write(temp_cwd, (uint8_t *)working_directory);
-
-      int tmpcwd = dir.first_blk;
-      disk.read(tmpcwd, (uint8_t *)working_directory);
-      for (auto &dir2 : working_directory)
-      {
-        if (std::string(dir2.file_name) == "..")
-        {
-          dir2.access_rights = std::stoi(accessrights, nullptr, 16);
-          disk.write(tmpcwd, (uint8_t *)working_directory);
-          break;
-        }
-      }
-      break;
     }
   }
 
