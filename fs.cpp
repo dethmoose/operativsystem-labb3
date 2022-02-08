@@ -84,6 +84,10 @@ int FS::create(std::string filepath)
   std::string new_filename = filepath_vec.back();
   filepath_vec.pop_back();
 
+  // Read cwd block and FAT block
+  disk.read(cwd, (uint8_t *)working_directory);
+  disk.read(FAT_BLOCK, (uint8_t *)fat);
+
   int current_block = findFirstFreeBlock();
   if (current_block == -1)
   {
@@ -93,13 +97,9 @@ int FS::create(std::string filepath)
 
   if (new_filename.length() >= 56)
   {
-    std::cout << "File name exceeds 56 character limit" << std::endl;
+    std::cout << "File name exceeds 55 character limit" << std::endl;
     return -1;
   }
-
-  // Read cwd block and FAT block
-  disk.read(cwd, (uint8_t *)working_directory);
-  disk.read(FAT_BLOCK, (uint8_t *)fat);
 
   int temp_cwd = traverseToDir(filepath_vec);
   if (temp_cwd == -1 || temp_cwd >= BLOCK_SIZE)
@@ -136,7 +136,7 @@ int FS::create(std::string filepath)
 
   // Create dir_entry
   dir_entry dir_ent;
-  std::strcpy(dir_ent.file_name, new_filename.c_str()); // TODO test substring or memcpy, test if NULL needed on disk
+  std::strcpy(dir_ent.file_name, new_filename.c_str());
   dir_ent.size = 0;
   dir_ent.first_blk = current_block;
   dir_ent.type = TYPE_FILE;
@@ -167,8 +167,7 @@ int FS::create(std::string filepath)
   int size = data_str.length();
 
   // Write FAT to disk
-  updateFAT(dir_ent.first_blk, size);
-  disk.write(FAT_BLOCK, (uint8_t *)fat);
+  updateFAT(dir_ent.first_blk, size / BLOCK_SIZE + 1);
 
   int index = 0;
   int counter = 0;
@@ -196,8 +195,7 @@ int FS::create(std::string filepath)
   }
 
   // Write to cwd block
-  dir_entry *ptr = &dir_ent;
-  createDirEntry(ptr, temp_cwd);
+  createDirEntry(&dir_ent, temp_cwd);
 
   return 0;
 }
@@ -261,9 +259,11 @@ int FS::cat(std::string filepath)
   // Read blocks
   do
   {
+    memset(char_array, 0, BLOCK_SIZE);
     disk.read(current_block, char_array);
     if (fat[current_block] != FAT_EOF)
     {
+
       for (int i = 0; i < BLOCK_SIZE; i++)
       {
         std::cout << char_array[i];
@@ -352,8 +352,8 @@ int FS::cp(std::string sourcepath, std::string destpath)
   std::string destination = dest_vec.back();
   dest_vec.pop_back();
 
-  if (destination.length() > 56) {
-    std::cout << "Filename " << destination << " exceeds 56 characters" << std::endl;
+  if (destination.length() >= 56) {
+    std::cout << "Filename " << destination << " exceeds 55 characters" << std::endl;
     return -1;
   }
 
@@ -458,8 +458,7 @@ int FS::cp(std::string sourcepath, std::string destpath)
   createDirEntry(&dir_ent, temp_cwd);
 
   // Write to FAT
-  updateFAT(block_no, size);
-  disk.write(FAT_BLOCK, (uint8_t *)fat);
+  updateFAT(block_no, size / BLOCK_SIZE + 1);
 
   // Copy data from sourcepath to destpath
   uint16_t dest_block = dir_ent.first_blk;
@@ -494,8 +493,8 @@ int FS::mv(std::string sourcepath, std::string destpath)
   std::string destination = dest_vec.back();
   dest_vec.pop_back();
 
-  if (destination.length() > 56) {
-    std::cout << "Filename " << destination << " exceeds 56 characters" << std::endl;
+  if (destination.length() >= 56) {
+    std::cout << "Filename " << destination << " exceeds 55 characters" << std::endl;
     return -1;
   }
 
@@ -818,8 +817,8 @@ int FS::append(std::string filepath1, std::string filepath2)
     filepath2_block = fat[filepath2_block];
 
   // Update FAT entries for filepath2
-  updateFAT(filepath2_block, size1);
-  disk.write(FAT_BLOCK, (uint8_t *)fat);
+  if (size1 + size2 > BLOCK_SIZE)
+    updateFAT(filepath2_block, size1 / BLOCK_SIZE + (size1 % BLOCK_SIZE + size2 % BLOCK_SIZE) / BLOCK_SIZE);
 
   // Read filepath1 data
   char block[BLOCK_SIZE] = {0};
@@ -836,7 +835,7 @@ int FS::append(std::string filepath1, std::string filepath2)
 
   // Write data to the end of filepath2
   int data_index = 0, first_iteration = 1;
-  while (filepath2_block != FAT_EOF && data_index < size1)
+  while (data_index < size1)
   {
     // Write one block at a time
     if (first_iteration)
@@ -875,6 +874,9 @@ int FS::append(std::string filepath1, std::string filepath2)
 
   disk.write(temp_cwd, (uint8_t *)working_directory);
 
+
+  disk.read(FAT_BLOCK, (uint8_t*)fat);
+
   return 0;
 }
 
@@ -890,8 +892,8 @@ int FS::mkdir(std::string dirpath)
   std::string new_directory = filepath.back();
   filepath.pop_back();
 
-  if (new_directory.length() > 56) { // TODO store 56 chars in struct
-    std::cout << "Filename " << new_directory << " exceeds 56 characters" << std::endl;
+  if (new_directory.length() >= 56) {
+    std::cout << "Filename " << new_directory << " exceeds 55 characters" << std::endl;
     return -1;
   }
 
@@ -924,16 +926,14 @@ int FS::mkdir(std::string dirpath)
 
   // Create dir_entry for directory
   dir_entry dir_ent;
-  //std::strcpy(dir_ent.file_name, new_directory.c_str());
-  std::memcpy(dir_ent.file_name, new_directory.c_str(), new_directory.length()); // no weird chars in ls output
+  std::strcpy(dir_ent.file_name, new_directory.c_str());
   dir_ent.size = 0;
   dir_ent.first_blk = current_block;
   dir_ent.type = TYPE_DIR;
   dir_ent.access_rights = READ | WRITE | EXECUTE;
 
   // Write FAT to disk
-  updateFAT(dir_ent.first_blk, dir_ent.size);
-  disk.write(FAT_BLOCK, (uint8_t *)fat);
+  updateFAT(dir_ent.first_blk, 1);
 
   // Write to working directory block
   dir_entry *ptr = &dir_ent;
@@ -1121,15 +1121,19 @@ int FS::createDirEntry(dir_entry *de, int dir_block)
 
 void FS::updateFAT(int block_start, uint32_t size)
 {
+  disk.read(FAT_BLOCK, (uint8_t*)fat);
   int current_block;
-  for (int i = 0; i <= (size / BLOCK_SIZE); i++)
-  {
-    fat[block_start] = 1;
-    current_block = block_start;
-    block_start = findFirstFreeBlock();
-    fat[current_block] = block_start;
-  }
-  fat[current_block] = FAT_EOF;
+
+    for (int i = 0; i < size; i++)
+    {
+      current_block = findFirstFreeBlock();
+      fat[block_start] = current_block;
+      block_start = current_block;
+      fat[current_block] = FAT_EOF;
+    }
+
+
+  disk.write(FAT_BLOCK, (uint8_t *)fat);
 }
 
 std::vector<std::string> FS::interpretFilepath(std::string dirpath)
