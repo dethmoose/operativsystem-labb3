@@ -91,7 +91,7 @@ int FS::create(std::string filepath)
     return -1;
   }
 
-  if (new_filename.length() > 56)
+  if (new_filename.length() >= 56)
   {
     std::cout << "File name exceeds 56 character limit" << std::endl;
     return -1;
@@ -136,7 +136,7 @@ int FS::create(std::string filepath)
 
   // Create dir_entry
   dir_entry dir_ent;
-  std::strcpy(dir_ent.file_name, new_filename.c_str());
+  std::strcpy(dir_ent.file_name, new_filename.c_str()); // TODO test substring or memcpy, test if NULL needed on disk
   dir_ent.size = 0;
   dir_ent.first_blk = current_block;
   dir_ent.type = TYPE_FILE;
@@ -352,6 +352,11 @@ int FS::cp(std::string sourcepath, std::string destpath)
   std::string destination = dest_vec.back();
   dest_vec.pop_back();
 
+  if (destination.length() > 56) {
+    std::cout << "Filename " << destination << " exceeds 56 characters" << std::endl;
+    return -1;
+  }
+
   int temp_cwd = traverseToDir(source_vec); // traverseToDir returns cwd if empty input vector
 
   // Find sourcepath, make sure destpath doesn't exist
@@ -423,6 +428,15 @@ int FS::cp(std::string sourcepath, std::string destpath)
     return -1;
   }
 
+  // Check if source filename already exists in destination dir
+  disk.read(temp_cwd, (uint8_t *)working_directory);
+  for (auto &dir: working_directory) {
+    if (dir.file_name == source) {
+      std::cout << source << " already exists" << std::endl;
+      return -1;
+    }
+  }
+
   int no_free = getNoFreeBlocks();
   if (no_free < size / BLOCK_SIZE)
   {
@@ -479,6 +493,11 @@ int FS::mv(std::string sourcepath, std::string destpath)
 
   std::string destination = dest_vec.back();
   dest_vec.pop_back();
+
+  if (destination.length() > 56) {
+    std::cout << "Filename " << destination << " exceeds 56 characters" << std::endl;
+    return -1;
+  }
 
   int source_cwd = traverseToDir(source_vec);
 
@@ -701,6 +720,9 @@ int FS::rm(std::string filepath)
 // the end of file <filepath2>. The file <filepath1> is unchanged.
 int FS::append(std::string filepath1, std::string filepath2)
 {
+  // TODO: append mellan två stora filer (mer än ett block) och append mellan två mindre
+  // filer som tillsammans blir en stor fil, ger inte korrekt output när man kör cat.
+
   // Read working directory block and FAT
   disk.read(cwd, (uint8_t *)working_directory);
   disk.read(FAT_BLOCK, (uint8_t *)fat);
@@ -868,6 +890,11 @@ int FS::mkdir(std::string dirpath)
   std::string new_directory = filepath.back();
   filepath.pop_back();
 
+  if (new_directory.length() > 56) { // TODO store 56 chars in struct
+    std::cout << "Filename " << new_directory << " exceeds 56 characters" << std::endl;
+    return -1;
+  }
+
   int temp_cwd = traverseToDir(filepath);
 
   if (temp_cwd == -1)
@@ -897,7 +924,8 @@ int FS::mkdir(std::string dirpath)
 
   // Create dir_entry for directory
   dir_entry dir_ent;
-  std::strcpy(dir_ent.file_name, new_directory.c_str());
+  //std::strcpy(dir_ent.file_name, new_directory.c_str());
+  std::memcpy(dir_ent.file_name, new_directory.c_str(), new_directory.length()); // no weird chars in ls output
   dir_ent.size = 0;
   dir_ent.first_blk = current_block;
   dir_ent.type = TYPE_DIR;
